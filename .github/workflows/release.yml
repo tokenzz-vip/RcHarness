@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 90
     permissions:
       contents: write
@@ -27,6 +27,7 @@ jobs:
       run:
         shell: bash
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Set temporary paths
@@ -67,6 +68,11 @@ jobs:
         with:
           ref: refs/tags/${{ env.RELEASE_TAG }}
           persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Run checks
         run: scripts/test_all.sh

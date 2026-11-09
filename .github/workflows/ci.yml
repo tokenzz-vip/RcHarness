@@ -7,10 +7,16 @@ on:
 
 jobs:
   test:
-    # Apple Silicon runner with Xcode 16+ (Swift 6 toolchain, macOS 15 SDK).
-    runs-on: macos-15
+    # Match the Swift 6.4 toolchain used to validate the version tags locally.
+    runs-on: xcode-27
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
       - name: Run checks
         run: scripts/test_all.sh
       - name: Build app bundle

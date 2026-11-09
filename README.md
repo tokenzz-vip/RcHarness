@@ -76,6 +76,8 @@ RC001-MS 与 RC003-MS 麦克风通过 ATVV BLE 解码为 PCM，再输出到随�
 
 在 Apple Silicon Mac 上：
 
+当前版本使用 Xcode 27.1 / Swift 6.4 验证；CI 和 Release 工作流固定使用同一工具链。应用的最低运行系统仍为 macOS 15。`v0.1.1` 的隐式成员初始化器依赖 Swift 6.4 的访问控制规则，不能使用 runner 默认的 Xcode 16.4 构建。
+
 ```bash
 scripts/test_all.sh
 ```
