@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    # Apple Silicon runner with Xcode 16+ (Swift 6 toolchain, macOS 15 SDK).
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run checks
+        run: scripts/test_all.sh
+      - name: Build app bundle
+        run: scripts/build_app.sh "$RUNNER_TEMP/RcHarness.app"

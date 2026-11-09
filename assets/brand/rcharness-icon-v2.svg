@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>RcHarness — remote control for AI apps</title>
+  <desc>A remote aimed at a conversation window with a prompt cursor: controlling AI chat and coding apps from a handheld remote.</desc>
+  <defs>
+    <linearGradient id="tile" x1="200" y1="64" x2="850" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#383B79"/>
+      <stop offset="0.55" stop-color="#24264F"/>
+      <stop offset="1" stop-color="#15172F"/>
+    </linearGradient>
+    <linearGradient id="remote" x1="340" y1="380" x2="440" y2="810" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E2E5F6"/>
+    </linearGradient>
+    <linearGradient id="chat" x1="450" y1="250" x2="790" y2="570" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C7BAFF"/>
+      <stop offset="1" stop-color="#9B8EEB"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="202" fill="url(#tile)"/>
+  <rect x="65.5" y="65.5" width="893" height="893" rx="200.5" stroke="#FFFFFF" stroke-opacity="0.14" stroke-width="3"/>
+  <path d="M474 258H738C779 258 812 291 812 332V478C812 519 779 552 738 552H545L458 614V552C426 545 400 515 400 478V332C400 291 433 258 474 258Z" fill="#0D1029" fill-opacity="0.25" transform="translate(0 16)"/>
+  <path d="M474 250H738C779 250 812 283 812 324V470C812 511 779 544 738 544H545L458 606V544C426 537 400 507 400 470V324C400 283 433 250 474 250Z" fill="url(#chat)"/>
+  <path d="M575 343L622 390L575 437" stroke="#25264F" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M666 438H715" stroke="#25264F" stroke-width="24" stroke-linecap="round"/>
+  <g transform="rotate(24 386 587)">
+    <rect x="286" y="384" width="200" height="438" rx="100" fill="#0D1029" fill-opacity="0.3"/>
+    <rect x="286" y="368" width="200" height="438" rx="100" fill="url(#remote)" stroke="#272951" stroke-width="12"/>
+    <circle cx="386" cy="478" r="59" fill="#272951"/>
+    <circle cx="386" cy="478" r="37" fill="#96E9D5"/>
+    <circle cx="386" cy="478" r="14" fill="#272951"/>
+    <rect x="365" y="590" width="42" height="22" rx="11" fill="#3D406B"/>
+    <rect x="365" y="649" width="42" height="22" rx="11" fill="#3D406B"/>
+    <rect x="365" y="708" width="42" height="22" rx="11" fill="#3D406B"/>
+  </g>
+  <path d="M308 322C330 320 352 326 369 339" stroke="#96E9D5" stroke-width="19" stroke-linecap="round"/>
+  <path d="M295 270C329 266 361 275 388 294" stroke="#96E9D5" stroke-opacity="0.65" stroke-width="19" stroke-linecap="round"/>
+</svg>

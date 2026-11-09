@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>RcHarness app icon</title>
+  <desc>A white remote and a mint pointer on a sapphire rounded square, representing remote control of a Mac.</desc>
+  <defs>
+    <linearGradient id="tile" x1="176" y1="80" x2="850" y2="960" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#479BFF"/>
+      <stop offset="0.52" stop-color="#2875ED"/>
+      <stop offset="1" stop-color="#244DCC"/>
+    </linearGradient>
+    <linearGradient id="remote" x1="400" y1="235" x2="570" y2="790" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E4F0FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="202" fill="url(#tile)"/>
+  <rect x="65.5" y="65.5" width="893" height="893" rx="200.5" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="3"/>
+  <g transform="rotate(-24 484 508)">
+    <rect x="366" y="242" width="236" height="556" rx="118" fill="#153D9C" fill-opacity="0.2"/>
+    <rect x="366" y="224" width="236" height="556" rx="118" fill="url(#remote)"/>
+    <circle cx="484" cy="365" r="67" stroke="#245DD1" stroke-width="25"/>
+    <circle cx="484" cy="365" r="20" fill="#245DD1"/>
+    <rect x="457" y="496" width="54" height="28" rx="14" fill="#245DD1"/>
+    <rect x="457" y="564" width="54" height="28" rx="14" fill="#245DD1"/>
+    <rect x="457" y="632" width="54" height="28" rx="14" fill="#245DD1"/>
+  </g>
+  <path d="M559 517L559 737L614 687L659 779L710 754L665 663L741 653L559 517Z" fill="#153D9C" fill-opacity="0.18" transform="translate(0 14)"/>
+  <path d="M559 517L559 737L614 687L659 779L710 754L665 663L741 653L559 517Z" fill="#97F4DF" stroke="#235CD0" stroke-width="16" stroke-linejoin="round"/>
+</svg>

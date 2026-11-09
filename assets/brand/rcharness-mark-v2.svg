@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <title>RcHarness — AI remote monochrome mark</title>
+  <defs>
+    <mask id="chat-cutouts" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="white"/>
+      <path d="M575 343L622 390L575 437M666 438H715" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="286" y="368" width="200" height="438" rx="100" transform="rotate(24 386 587)" fill="black" stroke="black" stroke-width="38"/>
+    </mask>
+    <mask id="remote-cutouts" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="1024">
+      <rect width="1024" height="1024" fill="white"/>
+      <g transform="rotate(24 386 587)" fill="black">
+        <circle cx="386" cy="478" r="50"/>
+        <rect x="365" y="590" width="42" height="22" rx="11"/>
+        <rect x="365" y="649" width="42" height="22" rx="11"/>
+        <rect x="365" y="708" width="42" height="22" rx="11"/>
+      </g>
+    </mask>
+  </defs>
+  <g fill="#24264F">
+    <path d="M474 250H738C779 250 812 283 812 324V470C812 511 779 544 738 544H545L458 606V544C426 537 400 507 400 470V324C400 283 433 250 474 250Z" mask="url(#chat-cutouts)"/>
+    <g mask="url(#remote-cutouts)">
+      <rect x="286" y="368" width="200" height="438" rx="100" transform="rotate(24 386 587)"/>
+    </g>
+    <circle cx="386" cy="478" r="18" transform="rotate(24 386 587)"/>
+  </g>
+  <path d="M308 322C330 320 352 326 369 339M295 270C329 266 361 275 388 294" stroke="#24264F" stroke-width="19" stroke-linecap="round"/>
+</svg>
