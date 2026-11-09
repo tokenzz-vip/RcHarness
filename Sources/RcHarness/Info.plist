@@ -9,7 +9,7 @@
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>0.1.2</string>
   <key>CFBundleShortVersionString</key><string>0.1.2</string>
-  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><false/>
   <key>NSBluetoothAlwaysUsageDescription</key><string>连接遥控器及其内置麦克风。</string>
   <key>NSMicrophoneUsageDescription</key><string>将遥控器麦克风提供给语音应用。</string>

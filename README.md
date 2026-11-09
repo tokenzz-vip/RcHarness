@@ -27,7 +27,7 @@ RcHarness 是原生 macOS 菜单栏应用，支持按键映射、应用切换和
 
 ## 系统与设备
 
-需要 **Apple Silicon Mac、macOS 15 或更高版本**，界面为简体中文。
+需要 **Apple Silicon Mac、macOS 14 或更高版本**，界面为简体中文。
 
 | 遥控器 | 型号 | 支持能力 |
 |---|---|---|
@@ -58,7 +58,7 @@ RcHarness 是原生 macOS 菜单栏应用，支持按键映射、应用切换和
 
 ## 开发
 
-项目使用 Swift、SwiftUI 和 Swift Package Manager，无第三方依赖。当前 CI 与发布使用 **Xcode 27.1 / Swift 6.4**，最低运行系统为 macOS 15。
+项目使用 Swift、SwiftUI 和 Swift Package Manager，无第三方依赖。当前 CI 与发布使用 **Xcode 27.1 / Swift 6.4**，最低运行系统为 macOS 14。
 
 本机构建前，将 `RC_HARNESS_LOCAL_SIGNING_IDENTITY` 设置为 `security find-identity -v -p codesigning` 列出的有效 Apple 签名身份，值不能是 `-`。若配置在 `~/.zshrc` 中，非交互构建时通过 `zsh -ic` 加载。
 

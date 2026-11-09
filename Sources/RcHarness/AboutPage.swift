@@ -37,7 +37,7 @@ struct AboutPage: View {
                                 .font(.system(size: 14, weight: .semibold))
                                 .monospacedDigit().help("构建 \(AppInfo.build)")
                         }.font(.system(size: 12))
-                        Text("Apple Silicon · macOS 15 及以上").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("Apple Silicon · macOS 14 及以上").font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack(spacing: 8) {
                             Button("检查更新…") {}.disabled(true).help("此本地构建尚未配置更新源")
                             Button("版本历史") { NSWorkspace.shared.open(AppInfo.history) }

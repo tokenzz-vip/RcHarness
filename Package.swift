@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "RcHarness",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v14)],
     products: [
         .executable(name: "RcHarness", targets: ["RcHarness"]),
     ],

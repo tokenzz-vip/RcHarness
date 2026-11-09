@@ -7,7 +7,7 @@ DRIVER="${OUTPUT}/RcHarnessMicrophone.driver"
 mkdir -p "${DRIVER}/Contents/MacOS"
 install -m 644 "${ROOT}/Drivers/RcHarnessMicrophone/Info.plist" "${DRIVER}/Contents/Info.plist"
 xcrun clang -arch arm64 -std=c11 -O2 -Wall -Wextra -Wno-unused-parameter -Werror \
-  -mmacosx-version-min=15.0 -bundle -fvisibility=hidden \
+  -mmacosx-version-min=14.0 -bundle -fvisibility=hidden \
   -framework CoreAudio -framework CoreFoundation \
   "${ROOT}/Drivers/RcHarnessMicrophone/Driver.c" \
   -o "${DRIVER}/Contents/MacOS/RcHarnessMicrophone"

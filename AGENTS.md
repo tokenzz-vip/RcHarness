@@ -4,7 +4,7 @@
 
 ## 环境
 
-- Apple Silicon、macOS 15+、Xcode 16+（Swift 6 工具链，语言模式 v5）。
+- Apple Silicon、macOS 14+、Xcode 16+（Swift 6 工具链，语言模式 v5）。
 - 无第三方依赖。新增依赖前先说明理由并征得同意。
 
 ## 常用命令
