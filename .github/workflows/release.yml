@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      APP_PATH: ${{ runner.temp }}/RcHarness.app
+      DIST_DIR: ${{ runner.temp }}/release-assets
+      KEYCHAIN_PATH: ${{ runner.temp }}/rcharness-release.keychain-db
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate version and release secrets
+        id: version
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          RC_HARNESS_SIGNING_IDENTITY: ${{ secrets.RC_HARNESS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo '::error::Release tags must use vMAJOR.MINOR.PATCH, for example v0.1.1.'
+            exit 1
+          fi
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD \
+            RC_HARNESS_SIGNING_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing repository secret: $name"
+              exit 1
+            fi
+          done
+          if [[ "$RC_HARNESS_SIGNING_IDENTITY" != 'Developer ID Application: '*" ($APPLE_TEAM_ID)" ]]; then
+            echo '::error::Use a Developer ID Application identity belonging to APPLE_TEAM_ID.'
+            exit 1
+          fi
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Run checks
+        run: scripts/test_all.sh
+
+      - name: Import signing certificate and notarization credentials
+        id: signing
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          RC_HARNESS_SIGNING_IDENTITY: ${{ secrets.RC_HARNESS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          umask 077
+          CERTIFICATE_PATH="$RUNNER_TEMP/rcharness-certificate.p12"
+          trap 'rm -f "$CERTIFICATE_PATH"' EXIT
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -k "$KEYCHAIN_PATH" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          SIGNING_HASH="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | awk -v name="$RC_HARNESS_SIGNING_IDENTITY" 'index($0, "\"" name "\"") { print toupper($2) }')"
+          if [[ ! "$SIGNING_HASH" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo '::error::The imported certificate must contain one valid matching signing identity and its private key.'
+            exit 1
+          fi
+          echo "identity=$SIGNING_HASH" >> "$GITHUB_OUTPUT"
+          xcrun notarytool store-credentials rcharness-release \
+            --keychain "$KEYCHAIN_PATH" --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+
+      - name: Build and verify distribution signatures
+        env:
+          RC_HARNESS_VERSION: ${{ steps.version.outputs.version }}
+          RC_HARNESS_BUILD: ${{ github.run_number }}
+          RC_HARNESS_SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          scripts/build_app.sh "$APP_PATH" distribution
+          for target in "$APP_PATH" "$APP_PATH/Contents/PlugIns/RcHarnessMicrophone.driver"; do
+            codesign --verify --deep --strict "$target"
+            metadata="$(codesign --display --verbose=4 "$target" 2>&1)"
+            if ! printf '%s\n' "$metadata" | grep -Fxq "TeamIdentifier=$APPLE_TEAM_ID"; then
+              echo '::error::A distribution signature belongs to an unexpected team.'
+              exit 1
+            fi
+            prefix="$RUNNER_TEMP/signature-certificate-"
+            codesign --display --extract-certificates="$prefix" "$target"
+            actual="$(shasum -a 1 "${prefix}0" | awk '{ print toupper($1) }')"
+            if [[ "$actual" != "$RC_HARNESS_SIGNING_IDENTITY" ]]; then
+              echo '::error::The app and HAL driver must use the selected signing certificate.'
+              exit 1
+            fi
+          done
+
+      - name: Notarize application and HAL driver
+        run: |
+          ditto -c -k --keepParent "$APP_PATH" "$RUNNER_TEMP/notarization.zip"
+          status=0
+          xcrun notarytool submit "$RUNNER_TEMP/notarization.zip" \
+            --keychain-profile rcharness-release --keychain "$KEYCHAIN_PATH" \
+            --wait --timeout 45m --output-format json > "$RUNNER_TEMP/notarization.json" || status=$?
+          cat "$RUNNER_TEMP/notarization.json"
+          submission="$(jq -r '.id // empty' "$RUNNER_TEMP/notarization.json")"
+          if [[ -n "$submission" ]]; then
+            xcrun notarytool log "$submission" --keychain-profile rcharness-release \
+              --keychain "$KEYCHAIN_PATH" "$RUNNER_TEMP/notarization-log.json" || true
+            if [[ -f "$RUNNER_TEMP/notarization-log.json" ]]; then
+              cat "$RUNNER_TEMP/notarization-log.json"
+            fi
+          fi
+          if [[ "$status" -ne 0 ]] || [[ "$(jq -r '.status' "$RUNNER_TEMP/notarization.json")" != Accepted ]]; then
+            echo '::error::Notarization was not accepted. See the submission and notarization log above.'
+            exit 1
+          fi
+
+      - name: Staple ticket and package release assets
+        run: |
+          xcrun stapler staple "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+          mkdir -p "$DIST_DIR"
+          ditto -c -k --keepParent "$APP_PATH" "$DIST_DIR/RcHarness-$RELEASE_TAG-macos-arm64.zip"
+          git archive --format=tar.gz --prefix="RcHarness-$RELEASE_TAG/" \
+            --output="$DIST_DIR/RcHarness-$RELEASE_TAG-source.tar.gz" HEAD
+          cp LICENSE "$DIST_DIR/LICENSE"
+          cd "$DIST_DIR"
+          shasum -a 256 ./*.zip ./*.tar.gz LICENSE > SHA256SUMS
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          assets=("$DIST_DIR"/*.zip "$DIST_DIR"/*.tar.gz "$DIST_DIR/LICENSE" "$DIST_DIR/SHA256SUMS")
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            if [[ "$(jq -r '.isDraft' "$RUNNER_TEMP/existing-release.json")" != true ]]; then
+              echo '::error::This version is already published. Push a new version tag instead of replacing its assets.'
+              exit 1
+            fi
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --draft --verify-tag \
+              --title "RcHarness $RELEASE_TAG" --generate-notes
+          fi
+          gh release edit "$RELEASE_TAG" --draft=false
+
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          if [[ -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$RUNNER_TEMP/rcharness-certificate.p12" "$RUNNER_TEMP"/signature-certificate-*

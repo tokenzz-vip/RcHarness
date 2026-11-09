@@ -30,6 +30,7 @@ BIN="$(swift build --package-path "${ROOT}" --show-bin-path --arch arm64 -c "${C
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/PlugIns" "${APP}/Contents/Resources"
 cp "${BIN}" "${APP}/Contents/MacOS/RcHarness"
 cp "${ROOT}/Sources/RcHarness/Info.plist" "${APP}/Contents/Info.plist"
+cp "${ROOT}/LICENSE" "${APP}/Contents/Resources/LICENSE"
 # Info.plist is the single version source; optionally stamp a release version.
 if [[ -n "${RC_HARNESS_VERSION:-}" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${RC_HARNESS_VERSION}" "${APP}/Contents/Info.plist"

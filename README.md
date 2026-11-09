@@ -111,6 +111,40 @@ open .build/RcHarness.app
 - 分发签名：设置 `RC_HARNESS_SIGNING_IDENTITY`，并传入第二个参数 `distribution`。该模式启用 hardened runtime 和安全时间戳，并附带 `scripts/RcHarness.entitlements`（录音输入），满足公证的签名要求；脚本本身不执行公证或发布。
 - 首次从界面安装麦克风组件需要管理员授权。
 
+### 自动发布 GitHub Release
+
+仓库提供 [Release 工作流](.github/workflows/release.yml)：推送 `v主版本.次版本.修订号` 标签后，在 Apple Silicon macOS runner 上运行完整测试，以 Developer ID Application 证书签名应用和随包 HAL 驱动，提交 Apple 公证，确认 `Accepted` 后附加公证票据并验证 Gatekeeper，最后自动发布 Release。普通推送和 PR 仍只运行 CI。
+
+首次配置，在仓库 **Settings → Secrets and variables → Actions → New repository secret** 添加以下六项 Secrets：
+
+| Secret | 内容 |
+|---|---|
+| `MACOS_CERTIFICATE_P12_BASE64` | 包含私钥的 Developer ID Application `.p12` 证书的 Base64 内容 |
+| `MACOS_CERTIFICATE_PASSWORD` | 导出 `.p12` 时设置的非空密码 |
+| `RC_HARNESS_SIGNING_IDENTITY` | `security find-identity -v -p codesigning` 列出的完整身份名称，例如 `Developer ID Application: Your Name (TEAMID)`；不包含两侧引号 |
+| `APPLE_ID` | Apple 开发者账号邮箱 |
+| `APPLE_TEAM_ID` | 该证书所属的开发者团队 ID |
+| `APPLE_APP_PASSWORD` | 在 [Apple 账户](https://account.apple.com/)「登录和安全 → App 专用密码」生成的密码，用于公证；[生成步骤](https://support.apple.com/zh-cn/102654)，不是 Apple 账户登录密码 |
+
+在「钥匙串访问」的「我的证书」中找到 Developer ID Application 证书，确认展开后包含私钥，再将该身份导出为带密码的 `.p12`。例如导出到桌面后，执行以下命令将 Base64 内容复制到剪贴板，粘贴至 `MACOS_CERTIFICATE_P12_BASE64`：
+
+```bash
+base64 -i ~/Desktop/DeveloperIDApplication.p12 | pbcopy
+```
+
+`.p12` 和密码只通过 GitHub Secrets 提供，不放进仓库。工作流生成临时钥匙串密码，结束后清理证书和钥匙串。它使用内置 `GITHUB_TOKEN` 的 `contents: write` 权限创建 Release，无需另外配置 GitHub PAT。证书导入方式见 [GitHub 官方说明](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)，公证过程见 [Apple 官方说明](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)。
+
+先提交并推送工作流及要发布的项目代码，再在目标提交上创建并推送版本标签，例如：
+
+```bash
+git tag -a v0.1.1 -m "Release v0.1.1"
+git push origin v0.1.1
+```
+
+当前仅支持 `v0.1.1` 这样的正式版本标签，不支持 `-beta` 等后缀。应用版本号取标签去掉 `v` 的部分，构建号取工作流运行序号；HAL 驱动保留自身独立版本号。Release 附件包括已公证的 `RcHarness-v0.1.1-macos-arm64.zip`、该提交的源码归档、`LICENSE` 和 `SHA256SUMS`；应用包内也保留 `Contents/Resources/LICENSE`。
+
+缺少 Secrets、测试失败、签名身份不符或公证未通过时，工作流停止发布。Apple 公证等待上限为 45 分钟，超时后可在 Actions 页面重跑；提交的处理可能仍在 Apple 侧继续。上传中断留下的同标签草稿可通过重跑补齐并发布；已发布版本不会被覆盖，应使用新版本标签。
+
 ### 排查
 
 - 同一遥控器只运行一款按键映射程序。Joy Harness 与 RcHarness 同时运行时，可能分别发送右 Command 和地球键，干扰微信输入法的语音快捷键；退出其他映射程序后，在 RcHarness 关闭再开启「按键映射」，重新应用原始按键抑制。原始 F5 和模拟语音键同时出现也会干扰快捷键匹配。
