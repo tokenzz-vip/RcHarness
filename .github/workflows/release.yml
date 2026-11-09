@@ -3,12 +3,18 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release (for example v0.1.1)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -21,14 +27,14 @@ jobs:
       run:
         shell: bash
     env:
-      RELEASE_TAG: ${{ github.ref_name }}
-      APP_PATH: ${{ runner.temp }}/RcHarness.app
-      DIST_DIR: ${{ runner.temp }}/release-assets
-      KEYCHAIN_PATH: ${{ runner.temp }}/rcharness-release.keychain-db
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
+      - name: Set temporary paths
+        run: |
+          printf '%s\n' \
+            "APP_PATH=$RUNNER_TEMP/RcHarness.app" \
+            "DIST_DIR=$RUNNER_TEMP/release-assets" \
+            "KEYCHAIN_PATH=$RUNNER_TEMP/rcharness-release.keychain-db" >> "$GITHUB_ENV"
 
       - name: Validate version and release secrets
         id: version
@@ -56,6 +62,11 @@ jobs:
             exit 1
           fi
           echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
 
       - name: Run checks
         run: scripts/test_all.sh
@@ -174,6 +185,7 @@ jobs:
       - name: Remove temporary signing material
         if: always()
         run: |
+          KEYCHAIN_PATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/rcharness-release.keychain-db}"
           if [[ -f "$KEYCHAIN_PATH" ]]; then
             security delete-keychain "$KEYCHAIN_PATH"
           fi

@@ -141,6 +141,14 @@ git tag -a v0.1.1 -m "Release v0.1.1"
 git push origin v0.1.1
 ```
 
+发布已存在的标签时，在 **Actions → Release → Run workflow** 中选择 `main` 分支，并将 `tag` 填为 `v0.1.1`；也可以在 GitHub CLI 登录后执行：
+
+```bash
+gh workflow run release.yml --ref main -f tag=v0.1.1
+```
+
+手动发布使用 `main` 上的工作流，但构建、测试和源码归档均来自指定标签的提交，因此无需移动已有标签。
+
 当前仅支持 `v0.1.1` 这样的正式版本标签，不支持 `-beta` 等后缀。应用版本号取标签去掉 `v` 的部分，构建号取工作流运行序号；HAL 驱动保留自身独立版本号。Release 附件包括已公证的 `RcHarness-v0.1.1-macos-arm64.zip`、该提交的源码归档、`LICENSE` 和 `SHA256SUMS`；应用包内也保留 `Contents/Resources/LICENSE`。
 
 缺少 Secrets、测试失败、签名身份不符或公证未通过时，工作流停止发布。Apple 公证等待上限为 45 分钟，超时后可在 Actions 页面重跑；提交的处理可能仍在 Apple 侧继续。上传中断留下的同标签草稿可通过重跑补齐并发布；已发布版本不会被覆盖，应使用新版本标签。
