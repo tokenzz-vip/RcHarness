@@ -42,7 +42,6 @@ struct AboutPage: View {
                             Button("检查更新…") {}.disabled(true).help("此本地构建尚未配置更新源")
                             Button("版本历史") { NSWorkspace.shared.open(AppInfo.history) }
                         }.controlSize(.small)
-                        Text("此构建尚未配置自动更新服务。").font(.system(size: 11)).foregroundStyle(.secondary)
                     }.frame(width: 236, alignment: .leading)
                 }.fixedSize(horizontal: false, vertical: true)
             }

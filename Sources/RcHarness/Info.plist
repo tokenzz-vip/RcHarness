@@ -7,8 +7,8 @@
   <key>CFBundleDisplayName</key><string>RcHarness</string>
   <key>CFBundleIconFile</key><string>RcHarness.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>0.1.0</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleVersion</key><string>0.1.2</string>
+  <key>CFBundleShortVersionString</key><string>0.1.2</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSUIElement</key><false/>
   <key>NSBluetoothAlwaysUsageDescription</key><string>连接遥控器及其内置麦克风。</string>
