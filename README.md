@@ -2,6 +2,9 @@
 
 RcHarness 是面向 Apple Silicon Mac、macOS 15 及以上版本的纯软件遥控器适配层。它直接读取 macOS 的 HID/Bluetooth 设备，把遥控器按键转换为鼠标、系统按键、应用快捷键和语音输入。
 
+> [!IMPORTANT]
+> **谷歌遥控器仅验证了拼多多（PDD）店铺「金利达数码科技大全」销售的谷歌 G9N9N 遥控器。其他店铺、批次或同型号产品尚未验证，兼容性不作保证。**
+
 支持 Xiaomi Bluetooth Remote 2（`RC001-MS`）、Xiaomi Bluetooth Remote 2 Pro（`RC003-MS`）与 Google Chromecast Voice Remote（`G9N9N`）。在「连接与语音 → 更换遥控器…」中选择型号，切换后保留键位方案与 Harness 绑定。小米 2 与 2 Pro 共用 HID usage 映射和 ATVV BLE 语音链路，并依据 Device Information 型号严格区分；两款遥控器均支持按住说话，可同时连接，并按各物理 HID 设备的型号区分，当前仅控制所选型号。G9N9N 的适配依据、按键表和真机验收边界见 [适配说明](docs/google-g9n9n.md)。
 
 ## 当前范围
