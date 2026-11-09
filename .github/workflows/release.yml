@@ -164,18 +164,15 @@ jobs:
           spctl --assess --type execute --verbose=4 "$APP_PATH"
           mkdir -p "$DIST_DIR"
           ditto -c -k --keepParent "$APP_PATH" "$DIST_DIR/RcHarness-$RELEASE_TAG-macos-arm64.zip"
-          git archive --format=tar.gz --prefix="RcHarness-$RELEASE_TAG/" \
-            --output="$DIST_DIR/RcHarness-$RELEASE_TAG-source.tar.gz" HEAD
-          cp LICENSE "$DIST_DIR/LICENSE"
           cd "$DIST_DIR"
-          shasum -a 256 ./*.zip ./*.tar.gz LICENSE > SHA256SUMS
+          shasum -a 256 "RcHarness-$RELEASE_TAG-macos-arm64.zip" > SHA256SUMS
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          assets=("$DIST_DIR"/*.zip "$DIST_DIR"/*.tar.gz "$DIST_DIR/LICENSE" "$DIST_DIR/SHA256SUMS")
+          assets=("$DIST_DIR/RcHarness-$RELEASE_TAG-macos-arm64.zip" "$DIST_DIR/SHA256SUMS")
           if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
             if [[ "$(jq -r '.isDraft' "$RUNNER_TEMP/existing-release.json")" != true ]]; then
               echo '::error::This version is already published. Push a new version tag instead of replacing its assets.'
