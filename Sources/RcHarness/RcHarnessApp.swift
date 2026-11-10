@@ -26,8 +26,11 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         onSelection: { [weak self] item in
             self?.dashboardModel?.matchApplication(item.application.applicationPath, bundleIdentifier: item.application.bundleIdentifier)
         },
-        onError: { [weak self] message in self?.dashboardModel?.actionMessage = message }
+        onError: { [weak self] message in self?.dashboardModel?.postNotice(message, level: .error) }
     )
+    private lazy var phrasePicker = PhrasePickerController { [weak self] text in
+        self?.sender.typeText(text)
+    }
     private var macroWork: [DispatchWorkItem] = []
     private lazy var voiceSession = RemoteVoiceSessionController(output: microphone) { [weak self] mapping, pressed in
         if let shortcut = mapping.shortcutForVoice {
@@ -59,6 +62,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         // The legacy per-device mapping only seeds the default profile on first launch.
         let initialMapping = RemoteMapping.legacy(profileID: RemoteProfiles.xiaomiRC003.id, defaults: settingsDefaults) ?? .defaults
         dashboardModel = RemoteDashboardModel(mapping: initialMapping, defaults: settingsDefaults)
+        NSApp.appearance = dashboardModel.themeMode.appearance
+        dashboardModel.onThemeModeChange = { NSApp.appearance = $0.appearance }
         hid = XiaomiRemoteHIDManager(profiles: [dashboardModel.remoteProfile])
         voice = XiaomiRemoteVoice(profile: dashboardModel.remoteProfile, defaults: settingsDefaults)
         configureInput()
@@ -78,6 +83,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         dashboardModel.onUninstallMicrophone = { [weak self] in self?.uninstallMicrophone() }
         dashboardModel.onRescan = { [weak self] in
             self?.harnessSwitcher.model.reset(reason: "rescan")
+            self?.phrasePicker.model.reset()
             self?.hid.rescan()
             self?.voice.stop()
             self?.voice.start()
@@ -97,8 +103,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         voice.gainDB = Float(dashboardModel.gain)
         microphone.onStateChange = { [weak self] state in
             self?.dashboardModel?.audioOutputState = state
-            if case .failed(let message) = state {
-                self?.dashboardModel?.actionMessage = message
+            if case .failed = state {
                 self?.heldVoiceInput = nil
                 self?.voiceSession.cancel()
                 self?.voice.cancelActiveStream()
@@ -139,9 +144,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         AudioDiagnostics.log("[RcHarness] voice permissions input=\(CGPreflightListenEventAccess()) accessibility=\(AXIsProcessTrusted())")
         inputPermissionsWereReady = dashboardModel.inputGranted && dashboardModel.accessibilityGranted
         if !dashboardModel.inputGranted || !dashboardModel.accessibilityGranted {
-            dashboardModel.actionMessage = "语音按键权限未就绪，请到「权限」页面开启输入监控和辅助功能。"
+            dashboardModel.showVoicePermissionNotice()
         } else if dashboardModel.microphoneUpdateAvailable {
-            dashboardModel.actionMessage = "麦克风组件有新版本，请在「连接与语音」中更新。"
+            dashboardModel.postNotice("麦克风组件有新版本，请在「连接与语音」中更新。", level: .warning,
+                                      recoveryAction: .connection, source: .microphoneUpdate)
         }
         updateStatusItem()
     }
@@ -150,6 +156,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         remoteSelectionRevision += 1
         let revision = remoteSelectionRevision
         hid.onConnectionChange = nil
+        hid.onProfileConnectionsChange = nil
+        dashboardModel.setConnectedRemoteProfiles([])
         hid.onButtonInput = nil
         hid.onButtonCancelled = nil
         hid.onSuppressionFailure = nil
@@ -158,6 +166,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         voice.onStreamEvent = nil
         voice.onVoiceButtonInput = nil
         harnessSwitcher.model.reset(reason: "remote-changed")
+        phrasePicker.model.reset()
         gestures.cancel()
         cancelMacros()
         heldVoiceInput = nil
@@ -191,7 +200,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         let ready = model.inputGranted && model.accessibilityGranted
         if !inputPermissionsWereReady, ready {
             hid.rescan()
-            model.actionMessage = "语音按键权限已就绪"
+            model.postNotice("语音按键权限已就绪", level: .success)
             AudioDiagnostics.log("[RcHarness] voice permissions restored; HID restarted")
         }
         inputPermissionsWereReady = ready
@@ -209,6 +218,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         harnessSwitcher.model.reset(reason: "termination")
+        phrasePicker.model.reset()
         dashboardModel?.flushPendingWrites()
         DistributedNotificationCenter.default().removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
@@ -228,12 +238,14 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     @objc private func foregroundApplicationChanged(_ notification: Notification) {
         let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         harnessSwitcher.model.dismiss(reason: "foreground-application-changed")
+        phrasePicker.model.dismiss()
         guard app?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
         dashboardModel?.matchApplication(app?.bundleURL?.path, bundleIdentifier: app?.bundleIdentifier)
     }
 
     @objc private func suspendVoice() {
         harnessSwitcher.model.reset(reason: "sleep")
+        phrasePicker.model.reset()
         dashboardModel?.flushPendingWrites()
         gestures.cancel()
         cancelMacros()
@@ -298,14 +310,18 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     private func configureInput() {
+        hid.onProfileConnectionsChange = { [weak self] ids in
+            self?.dashboardModel?.setConnectedRemoteProfiles(ids)
+        }
         hid.onSuppressionFailure = { [weak self] message in
-            self?.dashboardModel?.actionMessage = message
+            self?.dashboardModel?.postNotice(message, level: .error)
         }
         hid.onConnectionChange = { [weak self] connected in
             guard let self else { return }
             self.dashboardModel?.setConnected(connected)
             if !connected {
                 self.harnessSwitcher.model.reset(reason: "remote-disconnected")
+                self.phrasePicker.model.reset()
                 self.gestures.cancel()
                 self.cancelMacros()
                 self.heldVoiceInput = nil
@@ -323,6 +339,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         hid.onButtonCancelled = { [weak self] input in
             guard let self else { return }
             self.gestures.cancel(input)
+            self.phrasePicker.model.cancel(input)
             if self.heldVoiceInput == input {
                 self.heldVoiceInput = nil
                 self.voiceSession.cancel()
@@ -343,7 +360,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self?.handle(input: .options, pressed: pressed)
         }
         voice.onStreamEvent = { [weak self] event in
-            guard self?.harnessSwitcher.model.isPresented != true else { return }
+            guard self?.harnessSwitcher.model.isPresented != true,
+                  self?.phrasePicker.model.isPresented != true else { return }
             if case .started = event {
                 self?.dashboardModel?.stopTestTone()
             }
@@ -352,7 +370,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self?.voiceSession.handle(event)
         }
         voice.onSamples = { [weak self] samples in
-            guard self?.harnessSwitcher.model.isPresented != true else { return }
+            guard self?.harnessSwitcher.model.isPresented != true,
+                  self?.phrasePicker.model.isPresented != true else { return }
             self?.voiceSession.append(samples)
         }
     }
@@ -368,7 +387,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             voice.releaseRemappedPress()
             return
         }
-        let consumed = harnessSwitcher.model.handle(input, pressed: pressed)
+        let phraseConsumed = phrasePicker.model.handle(input, pressed: pressed)
+        let switcherConsumed = harnessSwitcher.model.handle(input, pressed: pressed)
+        let consumed = phraseConsumed || switcherConsumed
         if input == dashboardModel?.globalButtons.input {
             Log.switcher.notice("Global input=\(input.rawValue, privacy: .public) down=\(pressed) consumed=\(consumed) mapping_mode=\(self.mode == .mapping) single=\(self.mapping[input, .single].action.rawValue, privacy: .public) double=\(self.mapping[input, .double].action.rawValue, privacy: .public) long=\(self.mapping[input, .long].action.rawValue, privacy: .public)")
         }
@@ -392,7 +413,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             heldVoiceInput = nil
             voiceSession.cancel()
             voice.cancelActiveStream()
-            dashboardModel.actionMessage = voice.status
+            dashboardModel.postNotice(voice.status, level: .error, recoveryAction: .connection, source: .voiceConnection)
             return
         }
         AudioDiagnostics.log("[RcHarness] voice button down=\(pressed) action=\(mapping[.options].action.rawValue) tap=\(dashboardModel.voiceFnTap) accessibility=\(AXIsProcessTrusted())")
@@ -401,7 +422,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 heldVoiceInput = nil
                 voiceSession.cancel()
                 voice.cancelActiveStream()
-                dashboardModel.actionMessage = "语音按键权限未就绪，请到「权限」页面开启输入监控和辅助功能。"
+                dashboardModel.showVoicePermissionNotice()
                 return
             }
             guard heldVoiceInput == nil else { return }
@@ -413,11 +434,25 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     private func sendAction(_ button: ButtonMapping, pressed: Bool) {
-        if button.action == .openHarnessSwitcher {
+        if button.action == .openPhrases {
+            guard pressed, mode == .mapping else { return }
+            if phrasePicker.model.isPresented {
+                phrasePicker.model.dismiss()
+            } else {
+                harnessSwitcher.model.dismiss(reason: "phrases-opened")
+                gestures.cancel()
+                cancelMacros()
+                heldVoiceInput = nil
+                voiceSession.cancel()
+                voice.cancelActiveStream()
+                phrasePicker.show(phrases: dashboardModel.phrases, assignments: dashboardModel.phraseAssignments)
+            }
+        } else if button.action == .openHarnessSwitcher {
             guard pressed, mode == .mapping else { return }
             if harnessSwitcher.model.isPresented {
                 harnessSwitcher.model.dismiss(reason: "open-action-toggle")
             } else {
+                phrasePicker.model.dismiss()
                 harnessSwitcher.show()
                 gestures.cancel()
                 cancelMacros()
@@ -428,7 +463,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         } else if button.action == .switchToNativeMode {
             if pressed { setOperationMode(.native) }
         } else if button.action == .phrase {
-            if pressed, let phrase = dashboardModel?.phrases.first(where: { $0.id.uuidString == button.referenceID }) { sender.typeText(phrase.text) }
+            if pressed, let phrase = dashboardModel?.phrases.first(where: { $0.id.uuidString == button.referenceID }) {
+                sender.typeText(phrase.text)
+            }
         } else if button.action == .macro {
             if pressed, let macro = dashboardModel?.macros.first(where: { $0.id.uuidString == button.referenceID }) { runMacro(macro) }
         } else {
@@ -447,7 +484,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         do {
             plan = try MacroExecutionPlan(macro, macros: dashboardModel?.macros ?? [], phrases: dashboardModel?.phrases ?? [])
         } catch {
-            dashboardModel?.actionMessage = error.localizedDescription
+            dashboardModel?.postNotice(error.localizedDescription, level: .error, recoveryAction: .macros)
             return
         }
         let start = DispatchTime.now()
@@ -472,6 +509,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     private func setOperationMode(_ newMode: ControllerOperationMode) {
         guard mode != newMode else { return }
         harnessSwitcher.model.reset(reason: "mode-changed")
+        phrasePicker.model.reset()
         gestures.cancel()
         cancelMacros()
         heldVoiceInput = nil
@@ -498,7 +536,16 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             do {
                 try await RemoteMicrophoneInstallation.install()
                 dashboardModel?.refreshDevices()
-                showAlert(title: "安装完成", message: "请在系统声音设置中选择 RcHarness 遥控器麦克风。")
+                let receiver = dashboardModel?.outputDevices.first { $0.id == dashboardModel?.outputUID }?.name
+                let alert = NSAlert()
+                alert.messageText = "安装完成"
+                alert.informativeText = VoiceSetupGuidance.installationComplete(receiverName: receiver)
+                alert.addButton(withTitle: "打开连接与语音")
+                alert.addButton(withTitle: "完成")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    dashboardModel?.page = .connection
+                    showWindow()
+                }
             } catch is CancellationError {
                 return
             } catch {
@@ -545,6 +592,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
 
     @objc private func showWindow() {
         harnessSwitcher.model.dismiss(reason: "dashboard-opened")
+        phrasePicker.model.dismiss()
         if NSApp.currentEvent?.type == .rightMouseUp {
             statusItem.menu = statusMenu
             statusItem.button?.performClick(nil)
@@ -571,17 +619,112 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
               CommandLine.arguments.count > flag + 1 else { return false }
         let directory = URL(fileURLWithPath: CommandLine.arguments[flag + 1], isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        if CommandLine.arguments.contains("--dark") { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        dashboardModel.themeMode = CommandLine.arguments.contains("--dark") ? .dark : .light
         if CommandLine.arguments.contains("--narrow") { windowController.window?.setContentSize(SettingsStyle.minimumWindowSize) }
         NSApp.activate(ignoringOtherApps: true)
+        dashboardModel.phrases = DefaultPhrases.all
+        dashboardModel.phraseAssignments = DefaultPhrases.assignments(for: dashboardModel.phrases)
+        // Include both remote families and records outside the recent window.
+        func seedStatistics(historyDays: Int) {
+            dashboardModel.usageStore.clear()
+            let now = Date()
+            let calendar = Calendar.current
+            for offset in [0, 1, 2, 4, 6, historyDays] {
+                guard let date = calendar.date(byAdding: .day, value: -offset, to: now) else { continue }
+                for _ in 0..<(offset % 5 + 1) { dashboardModel.usageStore.record(.buttonA, at: date) }
+                dashboardModel.usageStore.record(offset.isMultiple(of: 2) ? .buttonY : .netflix, at: date)
+                dashboardModel.usageStore.recordVoice(seconds: Double(offset % 20 + 5), at: date)
+            }
+        }
+        seedStatistics(historyDays: 400)
         let pages = SettingsPage.allCases
         func render(_ index: Int) {
-            guard index <= pages.count + 4 else { NSApp.terminate(nil); return }
+            guard index <= pages.count + 17 else { NSApp.terminate(nil); return }
             let codexPreview = index == pages.count
             let switcherPreview = index == pages.count + 1
             let voiceEditorPreview = index == pages.count + 2
-            let profileNamePreview = index >= pages.count + 3
-            if switcherPreview {
+            let profileNamePreview = (pages.count + 3...pages.count + 4).contains(index)
+            let phrasePreview = index == pages.count + 5
+            let phraseEmptyPreview = index == pages.count + 6
+            let rapidDeletePreview = index == pages.count + 7
+            let configurationImportPreview = index == pages.count + 8
+            let deletionPreview = index == pages.count + 9
+            let deletionUndoPreview = index == pages.count + 10
+            let permissionNoticePreview = index == pages.count + 11
+            let permissionsDestinationPreview = index == pages.count + 12
+            let importFailurePreview = index == pages.count + 13
+            let importFailureDetailsPreview = index == pages.count + 14
+            let audioFailurePreview = index == pages.count + 15
+            let statisticsYearsPreview = index == pages.count + 16
+            let statisticsMonthsPreview = index == pages.count + 17
+            if statisticsYearsPreview || statisticsMonthsPreview {
+                for notice in dashboardModel.actionNotices { dashboardModel.dismissNotice(notice.id) }
+                dashboardModel.audioOutputState = .idle
+                dashboardModel.page = .statistics
+                seedStatistics(historyDays: statisticsMonthsPreview ? 60 : 400)
+            } else if importFailurePreview {
+                for notice in dashboardModel.actionNotices { dashboardModel.dismissNotice(notice.id) }
+                dashboardModel.page = .about
+                let details = (1...12).map {
+                    "第 \($0) 项：配置文件包含无法识别的按键方案。请检查备份版本、文件访问权限，以及对应遥控器的方案设置。"
+                }.joined(separator: "\n")
+                dashboardModel.postNotice("导入失败：\n" + details + "\n错误详情结束。", level: .error,
+                    recoveryAction: .configuration, source: .configurationImport)
+            } else if importFailureDetailsPreview {
+                dashboardModel.page = .about
+            } else if audioFailurePreview {
+                for notice in dashboardModel.actionNotices { dashboardModel.dismissNotice(notice.id) }
+                dashboardModel.page = .connection
+                dashboardModel.audioOutputState = .failed("无法启动所选接收设备：设备已断开或麦克风组件未加载。请刷新音频设备，重新选择接收设备，必要时重新安装麦克风组件后发送测试音。")
+            } else if permissionNoticePreview {
+                dashboardModel.dismissDeletionUndo()
+                dashboardModel.page = .connection
+                dashboardModel.showVoicePermissionNotice()
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if permissionsDestinationPreview {
+                dashboardModel.openPermissions()
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if deletionPreview {
+                let phrase = dashboardModel.phrases[0]
+                let macro = dashboardModel.addMacro()
+                dashboardModel.renameMacro(macro, name: "检查并提交结果")
+                dashboardModel.updateMacroSteps([MacroStep(mapping: ButtonMapping(action: .phrase,
+                    referenceID: phrase.id.uuidString))], for: macro)
+                let originalRemoteID = dashboardModel.remoteProfile.id
+                for profile in dashboardModel.availableRemoteProfiles.prefix(2) {
+                    dashboardModel.selectRemoteProfile(profile.id)
+                    dashboardModel.update(ButtonMapping(action: .phrase, referenceID: phrase.id.uuidString),
+                                          for: .buttonA, trigger: .double)
+                    dashboardModel.update(ButtonMapping(action: .macro, referenceID: macro.uuidString),
+                                          for: .buttonB, trigger: .long)
+                }
+                dashboardModel.selectRemoteProfile(originalRemoteID)
+                dashboardModel.page = .phrases
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if deletionUndoPreview {
+                dashboardModel.deleteConfigurationObject(.phrase(dashboardModel.phrases[0].id))
+                dashboardModel.page = .phrases
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if configurationImportPreview {
+                dashboardModel.page = .about
+                dashboardModel.phrases = DefaultPhrases.all
+                dashboardModel.phraseAssignments = DefaultPhrases.assignments(for: dashboardModel.phrases)
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if rapidDeletePreview {
+                dashboardModel.page = .mapping
+                dashboardModel.selectedInput = .buttonB
+                dashboardModel.selectedTrigger = .long
+                dashboardModel.update(ButtonMapping(action: .rapidDelete), for: .buttonB, trigger: .long)
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if phrasePreview {
+                phrasePicker.show(phrases: dashboardModel.phrases, assignments: dashboardModel.phraseAssignments)
+            } else if phraseEmptyPreview {
+                phrasePicker.model.dismiss()
+                dashboardModel.phrases = []
+                dashboardModel.phraseAssignments = PhraseAssignments()
+                dashboardModel.page = .phrases
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if switcherPreview {
                 harnessSwitcher.showPreview(narrow: CommandLine.arguments.contains("--narrow"))
             } else if voiceEditorPreview || profileNamePreview {
                 harnessSwitcher.model.dismiss(reason: "render-voice-editor")
@@ -599,8 +742,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 windowController.window?.makeKeyAndOrderFront(nil)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
-                let filename = profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : codexPreview ? "mapping-codex" : pages[index].rawValue
-                let voiceEditor = voiceEditorPreview ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel, actionFilter: .constant(.all))) : nil
+                let filename = statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : codexPreview ? "mapping-codex" : pages[index].rawValue
+                let voiceEditor = voiceEditorPreview || rapidDeletePreview ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel, actionFilter: .constant(.all))) : nil
                 voiceEditor?.frame = NSRect(x: 0, y: 0, width: 560, height: 560)
                 let isNewProfile = index == pages.count + 3
                 let nameEditor = profileNamePreview ? NSHostingView(rootView: ProfileNameSheet(
@@ -609,12 +752,68 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                     prefix: dashboardModel.profileDisplayPrefix, validateName: { _ in nil }, onCancel: {}, onConfirm: {})
                     .background(Color(nsColor: .windowBackgroundColor))) : nil
                 nameEditor?.frame = NSRect(x: 0, y: 0, width: 420, height: 200)
-                if let view: NSView = nameEditor ?? voiceEditor ?? (switcherPreview ? harnessSwitcher.renderView : windowController.window?.contentView) {
+                var configurationEditor: NSView?
+                if statisticsYearsPreview || statisticsMonthsPreview {
+                    let content = NSHostingView(rootView: StatisticsPage(store: dashboardModel.usageStore, range: .all)
+                        .padding(SettingsStyle.pagePadding)
+                        .frame(width: (windowController.window?.contentView?.bounds.width ?? 1120) - SettingsStyle.sidebarWidth - 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background(Color(nsColor: .controlBackgroundColor)))
+                    content.frame.size = content.fittingSize
+                    configurationEditor = content
+                } else if importFailureDetailsPreview, let notice = dashboardModel.actionNotices.first {
+                    let content = NSHostingView(rootView: ActionNoticeBanner(notice: notice,
+                        count: dashboardModel.actionNotices.count, onDismiss: {}, onNext: {}, onRecovery: { _ in },
+                        onCopy: {}, initiallyExpanded: true)
+                        .padding(24)
+                        .frame(width: 468)
+                        .background(Color(nsColor: .controlBackgroundColor)))
+                    content.frame.size = content.fittingSize
+                    configurationEditor = content
+                } else if deletionPreview {
+                    let target = DeletionTarget.phrase(dashboardModel.phrases[0].id)
+                    let pending = PendingDeletion(target: target, name: dashboardModel.phrases[0].displayTitle,
+                        impact: dashboardModel.deletionImpact(for: target))
+                    let content = NSHostingView(rootView: DeletionConfirmationSheet(model: dashboardModel, pending: pending)
+                        .background(Color(nsColor: .windowBackgroundColor)))
+                    content.frame.size = content.fittingSize
+                    configurationEditor = content
+                }
+                if configurationImportPreview {
+                    var backup = dashboardModel.configurationBackup()
+                    backup.phrases = Array(backup.phrases.prefix(3))
+                    if let prepared = try? PreparedConfiguration(backup, remoteProfile: dashboardModel.remoteProfile) {
+                        let preview = ConfigurationImportPreview(source: "RcHarness-配置备份.json", isRecovery: false,
+                            current: ConfigurationCounts(dashboardModel.configurationBackup()), prepared: prepared)
+                        let content = NSHostingView(rootView: ConfigurationImportSheet(model: dashboardModel, preview: preview)
+                            .background(Color(nsColor: .windowBackgroundColor)))
+                        content.frame.size = content.fittingSize
+                        configurationEditor = content
+                    }
+                }
+                if let view: NSView = configurationEditor ?? nameEditor ?? voiceEditor ?? (phrasePreview ? phrasePicker.renderView : switcherPreview ? harnessSwitcher.renderView : windowController.window?.contentView) {
                     view.layoutSubtreeIfNeeded()
                     if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                         view.cacheDisplay(in: view.bounds, to: bitmap)
                         if let data = bitmap.representation(using: .png, properties: [:]) {
                             try? data.write(to: directory.appendingPathComponent(filename + ".png"))
+                        }
+                    }
+                }
+                if index < pages.count, pages[index] == .about {
+                    // The general preferences sit below the window's initial scroll position.
+                    // Export the complete page as well so every preference can be inspected.
+                    let content = NSHostingView(rootView: AboutPage(model: dashboardModel)
+                        .padding(SettingsStyle.pagePadding)
+                        .frame(width: (windowController.window?.contentView?.bounds.width ?? 1120) - SettingsStyle.sidebarWidth - 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .background(Color(nsColor: .controlBackgroundColor)))
+                    content.frame.size = content.fittingSize
+                    content.layoutSubtreeIfNeeded()
+                    if let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
+                        content.cacheDisplay(in: content.bounds, to: bitmap)
+                        if let data = bitmap.representation(using: .png, properties: [:]) {
+                            try? data.write(to: directory.appendingPathComponent("about-content.png"))
                         }
                     }
                 }
@@ -640,8 +839,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
 @MainActor
 final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     var onWindowClose: (() -> Void)?
+    private let model: RemoteDashboardModel
 
     init(model: RemoteDashboardModel) {
+        self.model = model
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1120, height: 820),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -657,6 +858,10 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
         window.contentMinSize = SettingsStyle.minimumWindowSize
         super.init(window: window)
         window.delegate = self
+        // TextField and TextEditor use different AppKit editing notifications.
+        for name in [NSControl.textDidEndEditingNotification, NSText.didEndEditingNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(editorDidEndEditing(_:)), name: name, object: nil)
+        }
         let hostingView = NSHostingView(rootView: RemoteDashboardView(model: model))
         hostingView.translatesAutoresizingMaskIntoConstraints = false
         window.contentView = hostingView
@@ -671,7 +876,15 @@ final class DashboardWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    @objc private func editorDidEndEditing(_ notification: Notification) {
+        guard let view = notification.object as? NSView, view.window === window else { return }
+        model.flushPendingWrites()
+    }
+
+    func windowDidResignKey(_ notification: Notification) { model.flushPendingWrites() }
+
     func windowWillClose(_ notification: Notification) {
+        model.flushPendingWrites()
         onWindowClose?()
     }
 }

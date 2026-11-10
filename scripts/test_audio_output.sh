@@ -24,6 +24,8 @@ xcrun swiftc "${ROOT}/Sources/RcHarness/RemoteMicrophoneOutput.swift" \
   "${ROOT}/Sources/RcHarness/SettingsStorage.swift" \
   "${ROOT}/Sources/RcHarness/Log.swift" \
   "${ROOT}/Sources/RcHarness/AudioDiagnostics.swift" \
-  "${ROOT}/tests/audio-output-probe/main.swift" "${OUTPUT}/AudioExceptionGuard.o" \
+  "${ROOT}/Sources/RcHarness/AudioPerformance.swift" \
+  "${ROOT}/tests/audio-output-probe/main.swift" \
+  "${ROOT}/tests/audio-output-probe/latency.swift" "${OUTPUT}/AudioExceptionGuard.o" \
   -I "${OUTPUT}" -o "${OUTPUT}/probe"
 "${OUTPUT}/probe" "$@"

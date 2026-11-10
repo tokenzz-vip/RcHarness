@@ -1,19 +1,21 @@
 import SwiftUI
 
 struct ConnectionPage: View {
+    static let audioSectionID = "connection-audio"
     @ObservedObject var model: RemoteDashboardModel
     @State private var uninstallMicrophoneVisible = false
     @State private var remoteMenuHovered = false
 
     var body: some View {
-        Grid(horizontalSpacing: 16, verticalSpacing: 0) {
+        Grid(horizontalSpacing: SettingsStyle.Spacing.groups, verticalSpacing: 0) {
             GridRow {
                 remotePanel
                     .frame(width: 224)
                     .gridCellUnsizedAxes(.vertical)
-                VStack(spacing: 16) {
+                VStack(spacing: SettingsStyle.Spacing.groups) {
                     connectionInfoPanel
                     audioPanel
+                        .id(Self.audioSectionID)
                     microphonePanel
                 }
             }
@@ -22,7 +24,7 @@ struct ConnectionPage: View {
 
     private var remotePanel: some View {
         SettingsPanel {
-            VStack(spacing: 16) {
+            VStack(spacing: SettingsStyle.Spacing.groups) {
                 VStack(spacing: 6) {
                     Text(model.remoteProfile.shortName)
                         .font(.system(size: 14, weight: .semibold))
@@ -32,7 +34,7 @@ struct ConnectionPage: View {
                         .foregroundStyle(.secondary)
                     if model.remoteProfile.validation != .voiceVerified {
                         Text(model.remoteProfile.validation.rawValue)
-                            .font(.system(size: 11))
+                            .font(SettingsStyle.Typography.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -40,12 +42,10 @@ struct ConnectionPage: View {
                 LiveRemoteArtwork(live: model.live, profile: model.remoteProfile)
                     .frame(width: 80, height: 316)
                 Spacer(minLength: 12)
-                Menu {
-                    RemoteProfileMenuItems(model: model)
-                } label: {
-                    HStack(spacing: 8) {
+                RemoteProfileMenu(model: model) {
+                    HStack(spacing: SettingsStyle.Spacing.inline) {
                         Text(model.remoteProfile.shortName)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(SettingsStyle.Typography.body.weight(.medium))
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.down")
@@ -55,20 +55,17 @@ struct ConnectionPage: View {
                     .foregroundStyle(.primary)
                     .padding(.horizontal, 10)
                     .frame(height: 36)
-                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: SettingsStyle.controlRadius)
                             .fill(Color.primary.opacity(remoteMenuHovered ? 0.04 : 0))
                     }
                     .overlay {
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: SettingsStyle.controlRadius)
                             .strokeBorder(Color.primary.opacity(remoteMenuHovered ? 0.18 : 0.10))
                     }
-                    .contentShape(RoundedRectangle(cornerRadius: 10))
+                    .contentShape(RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
                 .onHover { remoteMenuHovered = $0 }
                 .help("更换遥控器")
                 .accessibilityLabel("更换遥控器，当前：\(model.remoteProfile.shortName)")
@@ -80,9 +77,9 @@ struct ConnectionPage: View {
 
     private var connectionInfoPanel: some View {
         SettingsPanel {
-            HStack(spacing: 12) {
+            HStack(spacing: SettingsStyle.Spacing.controls) {
                 Label("连接信息", systemImage: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(SettingsStyle.Typography.panelTitle)
                     .labelStyle(ConnectionPanelLabelStyle())
                 Spacer(minLength: 8)
                 Button("立即重新连接") { model.rescan() }
@@ -93,7 +90,16 @@ struct ConnectionPage: View {
                 .buttonStyle(.bordered)
             }
             .controlSize(.small)
-            HStack(alignment: .top, spacing: 18) {
+            if !model.inputGranted || !model.accessibilityGranted {
+                HStack {
+                    Text("语音按键需要输入监控和辅助功能权限。")
+                        .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("打开设置 → 权限") { model.openPermissions() }
+                        .controlSize(.small)
+                }
+            }
+            HStack(alignment: .top, spacing: SettingsStyle.Spacing.groups) {
                 ConnectionInfoItem(
                     title: "按键连接",
                     value: model.isConnected ? "已连接" : "等待连接",
@@ -106,10 +112,10 @@ struct ConnectionPage: View {
                 )
                 .help(model.voiceStatus)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("电量").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("电量").font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
                     Label(model.batteryLevel.map { "\(Int($0 * 100))%" } ?? "未知",
                           systemImage: batterySymbol(for: model.batteryLevel ?? 0))
-                        .font(.system(size: 12, weight: .medium))
+                        .font(SettingsStyle.Typography.body.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
                 .frame(width: 62, alignment: .leading)
@@ -120,18 +126,18 @@ struct ConnectionPage: View {
     private var microphonePanel: some View {
         SettingsPanel("虚拟麦克风组件", symbol: "mic") {
             HStack {
-                Text("组件状态").font(.system(size: 12))
+                Text("组件状态").font(SettingsStyle.Typography.body)
                 Spacer()
                 SettingsStatus(title: microphoneStatusTitle, color: model.microphoneInstalled && !model.microphoneUpdateAvailable ? .green : .orange)
             }
-            Text("在语音应用的麦克风设置中，选择上方的接收设备。系统默认输入和输出不会被自动修改。")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(VoiceSetupGuidance.systemDefault)
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             HStack {
                 Button(microphoneInstallTitle) { model.installMicrophone() }
                 if model.microphoneComponentPresent {
                     Button("卸载…") { uninstallMicrophoneVisible = true }
                 }
-                Button("声音设置") { openSystemSettings("x-apple.systempreferences:com.apple.Sound-Settings.extension?input") }
+                Button("系统默认输入…") { openSystemSettings("x-apple.systempreferences:com.apple.Sound-Settings.extension?input") }
             }.controlSize(.small)
             .confirmationDialog("卸载 RcHarness 麦克风组件？", isPresented: $uninstallMicrophoneVisible, titleVisibility: .visible) {
                 Button("卸载", role: .destructive) { model.uninstallMicrophone() }
@@ -154,23 +160,26 @@ struct ConnectionPage: View {
 
     private var audioPanel: some View {
         SettingsPanel("遥控器语音", symbol: "waveform") {
-            Text("遥控器麦克风 → 虚拟麦克风 → 语音应用")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+            Text("遥控器麦克风 → 接收设备 → 目标语音应用")
+                .font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
             Picker("接收设备", selection: $model.outputUID) {
                 if !model.outputDevices.contains(where: { $0.id == model.outputUID }) {
                     Text("所选设备不可用").tag(model.outputUID)
                 }
                 ForEach(model.outputDevices) { device in Text(device.name).tag(device.id) }
-            }.font(.system(size: 12))
-            HStack(spacing: 14) {
-                Text("增益").font(.system(size: 12))
+            }.font(SettingsStyle.Typography.body)
+            Text(VoiceSetupGuidance.selectReceiver)
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: SettingsStyle.Spacing.controls) {
+                Text("增益").font(SettingsStyle.Typography.body)
                 Slider(value: $model.gain, in: 0...24, step: 1).accessibilityLabel("语音增益")
                 Text("\(Int(model.gain)) dB").font(.system(size: 12, design: .monospaced)).frame(width: 48, alignment: .trailing)
             }
             Text("0 dB 不额外放大；音频仍会轻度降噪与限幅。增益会放大环境噪声，可从 6–12 dB 开始。")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             if case .failed(let message) = model.audioOutputState {
-                Text(message).font(.system(size: 11)).foregroundStyle(.red)
+                Text(message).font(SettingsStyle.Typography.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
@@ -182,6 +191,9 @@ struct ConnectionPage: View {
                     .accessibilityLabel("音频状态：" + model.audioOutputDescription)
                     .help("收音：\(model.voiceStatus)\n输出：\(model.audioOutputDescription)")
             }.controlSize(.small)
+            Text(VoiceSetupGuidance.checkInputLevel)
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -202,10 +214,10 @@ private struct ConnectionInfoItem: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(title).font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             HStack(spacing: 5) {
                 Circle().fill(color).frame(width: 6, height: 6)
-                Text(value).font(.system(size: 12, weight: .medium))
+                Text(value).font(SettingsStyle.Typography.body.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -215,8 +227,8 @@ private struct ConnectionInfoItem: View {
 
 private struct ConnectionPanelLabelStyle: LabelStyle {
     func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 8) {
-            configuration.icon.foregroundStyle(Color.accentColor)
+        HStack(spacing: SettingsStyle.Spacing.inline) {
+            configuration.icon.foregroundStyle(.secondary)
             configuration.title
         }
     }

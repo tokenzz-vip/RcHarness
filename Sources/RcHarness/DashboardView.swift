@@ -6,7 +6,7 @@ import SwiftUI
 struct RemoteDashboardView: View {
     @ObservedObject var model: RemoteDashboardModel
     @State private var actionFilter = ActionFilter.all
-    @State private var statisticsRange = StatisticsRange.week
+    @State private var statisticsRange = StatisticsRange.lastSevenDays
     @State private var clearStatisticsVisible = false
     @State private var newProfileVisible = false
     @State private var newProfileName = ""
@@ -20,21 +20,36 @@ struct RemoteDashboardView: View {
             VStack(spacing: 0) {
                 pageHeader
                 Divider()
-                if model.page == .mapping || model.page == .macros {
+                if model.page == .mapping || model.page == .macros || model.page == .phrases {
                     // These pages own their bounded scrolling regions.
                     pageContent
                         .padding(SettingsStyle.pagePadding)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
-                        pageContent
-                            .padding(SettingsStyle.pagePadding)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            pageContent
+                                .padding(SettingsStyle.pagePadding)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        .scrollIndicators(model.page == .statistics ? .never : .automatic)
+                        .onAppear {
+                            scrollToPermissions(using: proxy)
+                            scrollToNoticeRecovery(using: proxy)
+                        }
+                        .onChange(of: model.permissionsNavigationRequest) { _, _ in
+                            scrollToPermissions(using: proxy)
+                        }
+                        .onChange(of: model.noticeNavigationRequest?.id) { _, _ in
+                            scrollToNoticeRecovery(using: proxy)
+                        }
                     }
-                    .scrollIndicators(model.page == .statistics ? .never : .automatic)
                     .id(model.page)
                 }
                 if model.page == .mapping { MappingFooter(model: model) }
+                if let deleted = model.deletionUndoStack.last {
+                    DeletionUndoBar(model: model, deleted: deleted)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .controlBackgroundColor))
@@ -43,16 +58,27 @@ struct RemoteDashboardView: View {
         .frame(minWidth: SettingsStyle.minimumWindowSize.width, minHeight: SettingsStyle.minimumWindowSize.height)
         .tint(.blue)
         .overlay(alignment: .topTrailing) {
-            if !model.actionMessage.isEmpty {
-                messageBanner
+            if let notice = model.actionNotices.first {
+                ActionNoticeBanner(notice: notice, count: model.actionNotices.count,
+                                   onDismiss: { model.dismissNotice(notice.id) },
+                                   onNext: model.showNextNotice,
+                                   onRecovery: model.performNoticeRecovery,
+                                   onCopy: { model.copy(notice.message) })
+                    .id(notice.id)
                     .padding(.top, 92)
-                    .padding(.trailing, 24)
+                    .padding(.trailing, SettingsStyle.pagePadding)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                     .zIndex(10)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: model.actionMessage)
+        .animation(.easeInOut(duration: 0.2), value: model.actionNotices.first?.id)
         .sheet(isPresented: $model.editorVisible) { MappingEditorSheet(model: model, actionFilter: $actionFilter) }
+        .sheet(item: $model.pendingConfigurationImport) { preview in
+            ConfigurationImportSheet(model: model, preview: preview)
+        }
+        .sheet(item: $model.pendingDeletion) { pending in
+            DeletionConfirmationSheet(model: model, pending: pending)
+        }
         .sheet(isPresented: $newProfileVisible) {
             ProfileNameSheet(title: "新建按键方案", symbol: "plus", confirmTitle: "创建", name: $newProfileName,
                              prefix: model.profileDisplayPrefix,
@@ -84,13 +110,6 @@ struct RemoteDashboardView: View {
         .onChange(of: model.page) { _, page in
             model.editorVisible = false
         }
-        .onChange(of: model.actionMessage) { _, message in
-            guard !message.isEmpty else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                guard model.actionMessage == message else { return }
-                withAnimation { model.actionMessage = "" }
-            }
-        }
     }
 
     private func openRenameSheet() {
@@ -98,12 +117,45 @@ struct RemoteDashboardView: View {
         renameProfileVisible = true
     }
 
+    private func scrollToPermissions(using proxy: ScrollViewProxy) {
+        guard model.page == .about, let request = model.permissionsNavigationRequest else { return }
+        // Wait until the newly selected page has laid out its anchors.
+        DispatchQueue.main.async {
+            guard model.page == .about, model.permissionsNavigationRequest == request else { return }
+            proxy.scrollTo(AboutPage.permissionsSectionID, anchor: .top)
+            model.finishPermissionsNavigation(request)
+        }
+    }
+
+    private func scrollToNoticeRecovery(using proxy: ScrollViewProxy) {
+        guard let request = model.noticeNavigationRequest else { return }
+        let anchor: String
+        switch request.action {
+        case .connection where model.page == .connection: anchor = ConnectionPage.audioSectionID
+        case .configuration where model.page == .about: anchor = AboutPage.configurationSectionID
+        default: return
+        }
+        let targetPage = model.page
+        DispatchQueue.main.async {
+            guard model.page == targetPage, model.noticeNavigationRequest?.id == request.id else { return }
+            proxy.scrollTo(anchor, anchor: .top)
+            model.finishNoticeNavigation(request.id)
+        }
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
-            Text("RcHarness")
-                .font(.system(size: 15, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12).padding(.bottom, 20)
+            VStack(spacing: 6) {
+                Image(nsImage: NSApplication.shared.applicationIconImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 64, height: 64)
+                    .accessibilityHidden(true)
+                Text("RcHarness")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 12).padding(.bottom, 20)
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 2) {
                     ForEach(SettingsPage.navigation) { page in navigationButton(page) }
@@ -116,10 +168,9 @@ struct RemoteDashboardView: View {
     }
 
     private func navigationButton(_ page: SettingsPage) -> some View {
-        let selected = (model.page == .phrases ? .mapping : model.page) == page
+        let selected = model.page == page || (page == .mapping && model.page == .phrases)
         return Button {
             model.page = page
-            model.actionMessage = ""
         } label: {
             VStack(spacing: 8) {
                 Group {
@@ -144,9 +195,9 @@ struct RemoteDashboardView: View {
     }
 
     private var pageHeader: some View {
-        HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: SettingsStyle.Spacing.groups) {
             HStack(alignment: .center, spacing: 28) {
-                Text(model.page.title).font(.system(size: 25, weight: .bold))
+                Text(model.page.title).font(SettingsStyle.Typography.pageTitle)
                 if model.page != .statistics {
                     mappingToggle
                 }
@@ -157,16 +208,16 @@ struct RemoteDashboardView: View {
                 Picker("时间范围", selection: $statisticsRange) {
                     ForEach(StatisticsRange.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented).frame(width: 180)
+                .pickerStyle(.segmented).frame(width: 230)
                 Button("清除统计") { clearStatisticsVisible = true }
                     .buttonStyle(.bordered).controlSize(.small)
                 Label("数据仅存本机", systemImage: "lock")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             } else {
                 deviceCard
             }
         }
-        .padding(.horizontal, 24).padding(.vertical, 18)
+        .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, 18)
         .frame(minHeight: 82)
     }
 
@@ -175,21 +226,16 @@ struct RemoteDashboardView: View {
             get: { model.operationMode == .mapping },
             set: { _ in model.toggleMode() }
         ))
-        .toggleStyle(.switch).controlSize(.small).font(.system(size: 12))
+        .toggleStyle(.switch).controlSize(.small).font(SettingsStyle.Typography.body)
         .fixedSize()
         .help("关闭后，遥控器按原生方式工作；重新开启此开关可恢复映射。")
         .accessibilityHint("关闭后，遥控器按原生方式工作；重新开启此开关可恢复映射。")
     }
 
     private var deviceCard: some View {
-        Menu {
-            RemoteProfileMenuItems(model: model)
-        } label: {
+        RemoteProfileMenu(model: model) {
             deviceCardLabel
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
         .fixedSize()
         .help("更换遥控器")
         .accessibilityLabel("更换遥控器，当前：\(model.remoteProfile.shortName)")
@@ -197,10 +243,10 @@ struct RemoteDashboardView: View {
     }
 
     private var deviceCardLabel: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: SettingsStyle.Spacing.inline) {
             Image(systemName: "appletvremote.gen4.fill").font(.system(size: 24)).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 5) {
-                Text(model.remoteProfile.shortName).font(.system(size: 12, weight: .semibold))
+                Text(model.remoteProfile.shortName).font(SettingsStyle.Typography.body.weight(.semibold))
                 HStack(spacing: 6) {
                     Circle().fill(model.isConnected ? .green : .secondary).frame(width: 6, height: 6)
                     Text(model.isConnected ? "已连接" : "未连接")
@@ -209,32 +255,18 @@ struct RemoteDashboardView: View {
                         Image(systemName: batterySymbol(for: battery))
                         Text("\(Int(battery * 100))%")
                     }
-                }.font(.system(size: 11)).foregroundStyle(.secondary)
+                }.font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             }
             Image(systemName: "chevron.down")
-                .font(.system(size: 11, weight: .semibold))
+                .font(SettingsStyle.Typography.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.leading, 12)
+                .padding(.leading, SettingsStyle.controlPadding)
         }
         .foregroundStyle(.primary)
-        .padding(12)
-        .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.25)) }
-        .contentShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var messageBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle").foregroundStyle(Color.accentColor)
-            Text(model.actionMessage).font(.system(size: 12)).textSelection(.enabled).lineLimit(2)
-            Spacer()
-            Button { model.actionMessage = "" } label: { Image(systemName: "xmark") }.buttonStyle(.plain).help("关闭提示")
-        }
-        .padding(.horizontal, 14).padding(.vertical, 11)
-        .frame(maxWidth: 420, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.3)) }
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 5)
+        .padding(SettingsStyle.controlPadding)
+        .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
+        .overlay { RoundedRectangle(cornerRadius: SettingsStyle.controlRadius).strokeBorder(Color.primary.opacity(0.1)) }
+        .contentShape(RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
     }
 
     @ViewBuilder private var pageContent: some View {
@@ -255,7 +287,7 @@ struct RemoteDashboardView: View {
             }
         case .phrases: PhrasesPage(model: model)
         case .about: AboutPage(model: model)
-        case .statistics: StatisticsPage(store: model.usageStore, range: statisticsRange, inputs: model.remoteProfile.inputs)
+        case .statistics: StatisticsPage(store: model.usageStore, range: statisticsRange)
         }
     }
 }
@@ -280,7 +312,7 @@ struct ProfileNameSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
             Label(title, systemImage: symbol)
                 .font(.system(size: 17, weight: .semibold))
             VStack(alignment: .leading, spacing: 6) {
@@ -295,7 +327,7 @@ struct ProfileNameSheet: View {
                     }
                     TextField("方案名称", text: $name)
                         .textFieldStyle(.plain)
-                        .padding(8)
+                        .padding(SettingsStyle.compactControlPadding)
                         .onSubmit { if canConfirm { onConfirm() } }
                 }
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
@@ -312,7 +344,7 @@ struct ProfileNameSheet: View {
                     .disabled(!canConfirm)
             }
         }
-        .padding(24)
+        .padding(SettingsStyle.pagePadding)
         .frame(width: 420)
     }
 }

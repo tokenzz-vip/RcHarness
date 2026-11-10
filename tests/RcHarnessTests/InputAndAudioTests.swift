@@ -114,7 +114,8 @@ final class InputAndAudioTests: XCTestCase {
         let playback = Playback()
         var prepared: ((Result<Void, Error>) -> Void)?
         playback.prepareHandler = { prepared = $0 }
-        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
         output.prepareForPress()
         output.begin()
         output.append([1, 2])
@@ -128,7 +129,11 @@ final class InputAndAudioTests: XCTestCase {
         XCTAssertEqual(playback.packets, [[1, 2]])
         XCTAssertEqual(releases, 0)
         playback.completeAll()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await drainMainQueue()
+        clock.advance(0.049)
+        XCTAssertEqual(output.state, .draining)
+        XCTAssertEqual(releases, 0)
+        clock.advance(0.001)
         XCTAssertEqual(output.state, .idle)
         XCTAssertEqual(output.deliveredSamples, 2)
         XCTAssertEqual(releases, 1)
@@ -262,7 +267,8 @@ final class InputAndAudioTests: XCTestCase {
 
     func testVoiceKeyWaitsForBleStopAndPlaybackBeforeRelease() async throws {
         let playback = Playback()
-        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
         var releases = 0
         output.prepareForPress()
         output.begin()
@@ -273,7 +279,10 @@ final class InputAndAudioTests: XCTestCase {
         output.handle(.ended)
         XCTAssertEqual(output.state, .draining)
         playback.completeAll()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await drainMainQueue()
+        clock.advance(0.049)
+        XCTAssertEqual(releases, 0)
+        clock.advance(0.001)
         XCTAssertEqual(releases, 1)
         XCTAssertEqual(output.state, .idle)
         XCTAssertEqual(output.deliveredSamples, 3)
@@ -282,7 +291,8 @@ final class InputAndAudioTests: XCTestCase {
 
     func testVoiceKeyReleaseWaitsForLateBleStart() async throws {
         let playback = Playback()
-        let output = RemoteMicrophoneOutput(streamEndTimeout: 0.05, makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(streamEndTimeout: 0.05, schedule: clock.schedule, makePlayback: { playback })
         var released = false
 
         output.prepareForPress()
@@ -293,14 +303,16 @@ final class InputAndAudioTests: XCTestCase {
         output.append([1, 2, 3])
         output.handle(.ended)
         playback.completeAll()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await drainMainQueue()
+        clock.advance(0.05)
         XCTAssertTrue(released)
         output.stop()
     }
 
     func testReplacementBleStreamWhileKeyIsHeldStillWaitsForItsTail() async throws {
         let playback = Playback()
-        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
         output.prepareForPress()
         output.begin()
         output.append([1, 2])
@@ -311,20 +323,30 @@ final class InputAndAudioTests: XCTestCase {
         XCTAssertEqual(releases, 0)
         output.end()
         playback.completeAll()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await drainMainQueue()
+        clock.advance(0.05)
         XCTAssertEqual(releases, 1)
         XCTAssertEqual(output.deliveredSamples, 2)
         output.stop()
     }
 
-    func testMissingBleStopCannotKeepTheVoiceKeyHeld() async throws {
+    func testMissingBleStopCannotKeepTheVoiceKeyHeld() {
         let playback = Playback()
-        let output = RemoteMicrophoneOutput(streamEndTimeout: 0.02, makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(streamEndTimeout: 0.02, schedule: clock.schedule, makePlayback: { playback })
         output.prepareForPress()
         output.begin()
         var released = false
         output.releaseWhenFinished { released = true }
-        try await Task.sleep(nanoseconds: 150_000_000)
+        clock.advance(0.019)
+        XCTAssertEqual(output.state, .streaming)
+        XCTAssertFalse(released)
+        clock.advance(0.001)
+        XCTAssertEqual(output.state, .draining)
+        XCTAssertFalse(released)
+        clock.advance(0.049)
+        XCTAssertFalse(released)
+        clock.advance(0.001)
         XCTAssertTrue(released)
         XCTAssertEqual(output.state, .idle)
         output.stop()
@@ -334,7 +356,8 @@ final class InputAndAudioTests: XCTestCase {
         let first = Playback()
         let second = Playback()
         var attempts = 0
-        let output = RemoteMicrophoneOutput(makePlayback: {
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
             defer { attempts += 1 }
             return attempts == 0 ? first : second
         })
@@ -350,7 +373,7 @@ final class InputAndAudioTests: XCTestCase {
         output.begin()
         output.append([4, 5])
         first.completeAll()
-        try await Task.sleep(nanoseconds: 30_000_000)
+        await drainMainQueue()
         XCTAssertEqual(output.queuedSamples, 2)
         XCTAssertEqual(output.deliveredSamples, 0)
         XCTAssertEqual(output.state, .streaming)
@@ -410,7 +433,8 @@ final class InputAndAudioTests: XCTestCase {
         let interrupted = Playback()
         let replacement = Playback()
         var creations = 0
-        let output = RemoteMicrophoneOutput(makePlayback: {
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
             creations += 1
             return creations == 1 ? interrupted : replacement
         })
@@ -424,7 +448,8 @@ final class InputAndAudioTests: XCTestCase {
         output.append([5, 6]) // BLE keeps arriving while the graph is replaced.
         output.end()
         interrupted.completeAll() // Stopping a player can complete discarded buffers.
-        try await Task.sleep(nanoseconds: 200_000_000)
+        clock.advance(0.05)
+        await drainMainQueue()
 
         XCTAssertNil(output.failure)
         XCTAssertEqual(creations, 2)
@@ -433,7 +458,8 @@ final class InputAndAudioTests: XCTestCase {
         XCTAssertEqual(output.deliveredSamples, 0)
         XCTAssertEqual(releases, 0)
         replacement.completeAll()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await drainMainQueue()
+        clock.advance(0.05)
         XCTAssertEqual(output.deliveredSamples, 6)
         XCTAssertEqual(releases, 1)
         XCTAssertEqual(output.state, .idle)
@@ -444,7 +470,8 @@ final class InputAndAudioTests: XCTestCase {
         let interrupted = Playback()
         let replacement = Playback()
         var creations = 0
-        let output = RemoteMicrophoneOutput(makePlayback: {
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
             creations += 1
             return creations == 1 ? interrupted : replacement
         })
@@ -453,11 +480,13 @@ final class InputAndAudioTests: XCTestCase {
         output.end()
         interrupted.isInterrupted = true
         interrupted.onInterruption?()
-        try await Task.sleep(nanoseconds: 200_000_000)
+        clock.advance(0.05)
+        await drainMainQueue()
         XCTAssertEqual(replacement.packets, [[1, 2]])
         XCTAssertEqual(output.state, .draining)
         replacement.completeAll()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await drainMainQueue()
+        clock.advance(0.05)
         XCTAssertEqual(output.state, .idle)
         output.stop()
     }
@@ -465,7 +494,8 @@ final class InputAndAudioTests: XCTestCase {
     func testStopDuringRecoveryCancelsReplacementAndReleasesVoiceKeyOnce() async throws {
         let interrupted = Playback()
         var creations = 0
-        let output = RemoteMicrophoneOutput(makePlayback: { creations += 1; return interrupted })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { creations += 1; return interrupted })
         output.prepareForPress()
         output.begin()
         output.append([1])
@@ -475,7 +505,8 @@ final class InputAndAudioTests: XCTestCase {
         interrupted.onInterruption?()
         output.stop()
         interrupted.completeAll()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await drainMainQueue()
+        clock.advance(0.15)
         XCTAssertEqual(creations, 1)
         XCTAssertEqual(output.deliveredSamples, 0)
         XCTAssertEqual(output.queuedSamples, 0)
@@ -483,10 +514,11 @@ final class InputAndAudioTests: XCTestCase {
         XCTAssertEqual(output.state, .idle)
     }
 
-    func testRepeatedConfigurationChangesHaveABoundedRecoveryBudget() async throws {
+    func testRepeatedConfigurationChangesHaveABoundedRecoveryBudget() {
         let playbacks = (0..<4).map { _ in Playback() }
         var creations = 0
-        let output = RemoteMicrophoneOutput(makePlayback: {
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
             defer { creations += 1 }
             return playbacks[min(creations, 3)]
         })
@@ -498,7 +530,7 @@ final class InputAndAudioTests: XCTestCase {
         for index in 0..<3 {
             playbacks[index].isInterrupted = true
             playbacks[index].onInterruption?()
-            try await Task.sleep(nanoseconds: 100_000_000)
+            clock.advance(0.05)
         }
         XCTAssertEqual(creations, 3)
         XCTAssertNotNil(output.failure)
@@ -513,38 +545,215 @@ final class InputAndAudioTests: XCTestCase {
         output.stop()
     }
 
-    func testDelayedStartupBuffersSpeechAndAnEmptyStreamCanDrain() async throws {
+    func testDelayedStartupBuffersSpeechAndAnEmptyStreamCanDrain() {
         let playback = Playback()
         playback.startupDelay = 0.02
-        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
         output.begin()
         output.append([1, 2])
         XCTAssertEqual(playback.startCount, 0)
         XCTAssertTrue(playback.packets.isEmpty)
-        try await Task.sleep(nanoseconds: 50_000_000)
+        clock.advance(0.019)
+        XCTAssertEqual(playback.startCount, 0)
+        XCTAssertTrue(playback.packets.isEmpty)
+        clock.advance(0.001)
         XCTAssertEqual(playback.startCount, 1)
         XCTAssertEqual(playback.packets, [[1, 2]])
         output.stop()
 
         output.begin()
         output.end()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        clock.advance(0.15)
         XCTAssertEqual(output.state, .idle)
         XCTAssertNil(output.failure)
         output.stop()
     }
 
-    func testStopBeforeDelayedStartupNeverStartsTheCancelledGraph() async throws {
+    func testStopBeforeDelayedStartupNeverStartsTheCancelledGraph() {
         let playback = Playback()
         playback.startupDelay = 0.02
-        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
         output.begin()
         output.append([1])
         output.stop()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        clock.advance(0.05)
         XCTAssertEqual(playback.startCount, 0)
         XCTAssertTrue(playback.packets.isEmpty)
         XCTAssertEqual(output.state, .idle)
+    }
+
+    func testHealthyDeviceNotificationKeepsTheCurrentPlayerAndPendingAudio() {
+        let playback = Playback()
+        let clock = TestClock()
+        var creations = 0
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
+            creations += 1
+            return playback
+        })
+        output.begin()
+        output.append([1, 2])
+        output.audioDevicesChanged()
+        clock.advance(0.1)
+        XCTAssertEqual(creations, 1)
+        XCTAssertEqual(output.state, .streaming)
+        XCTAssertEqual(output.queuedSamples, 2)
+        XCTAssertEqual(playback.packets, [[1, 2]])
+        output.stop()
+    }
+
+    func testUnhealthyDeviceNotificationReplaysAudioAndRetiresOldCallbacks() async {
+        let old = Playback()
+        let replacement = Playback()
+        let clock = TestClock()
+        old.healthHandler = { $0(false) }
+        var creations = 0
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
+            creations += 1
+            return creations == 1 ? old : replacement
+        })
+        output.prepareForPress()
+        output.begin()
+        output.append([1, 2])
+        output.audioDevicesChanged()
+        output.append([3, 4])
+        output.end()
+        var releases = 0
+        output.releaseWhenFinished { releases += 1 }
+        old.completeAll()
+        await drainMainQueue()
+        XCTAssertEqual(output.queuedSamples, 4)
+        XCTAssertEqual(output.deliveredSamples, 0)
+        clock.advance(0.049)
+        XCTAssertEqual(creations, 1)
+        clock.advance(0.001)
+        XCTAssertEqual(creations, 2)
+        XCTAssertEqual(replacement.packets, [[1, 2], [3, 4]])
+        XCTAssertEqual(releases, 0)
+        replacement.completeAll()
+        await drainMainQueue()
+        clock.advance(0.05)
+        XCTAssertEqual(output.deliveredSamples, 4)
+        XCTAssertEqual(output.droppedSamples, 0)
+        XCTAssertEqual(output.state, .idle)
+        XCTAssertEqual(releases, 1)
+        output.stop()
+    }
+
+    func testLateDeviceHealthFailureCannotRebuildAReplacementSession() throws {
+        let old = Playback()
+        let replacement = Playback()
+        let clock = TestClock()
+        var healthReply: ((Bool) -> Void)?
+        old.healthHandler = { healthReply = $0 }
+        var creations = 0
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
+            creations += 1
+            return creations == 1 ? old : replacement
+        })
+        output.begin()
+        output.audioDevicesChanged()
+        let reply = try XCTUnwrap(healthReply)
+        output.stop()
+        output.begin()
+        output.append([7, 8])
+        reply(false)
+        clock.advance(10)
+        XCTAssertEqual(creations, 2)
+        XCTAssertEqual(output.state, .streaming)
+        XCTAssertEqual(output.queuedSamples, 2)
+        XCTAssertEqual(replacement.packets, [[7, 8]])
+        XCTAssertNil(output.failure)
+        output.stop()
+    }
+
+    func testIdleDeviceChangeDiscardsWarmPlayerAndNextPressCreatesAnother() {
+        let clock = TestClock()
+        var creations = 0
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: {
+            creations += 1
+            return Playback()
+        })
+        output.warmUp()
+        XCTAssertEqual(creations, 1)
+        output.audioDevicesChanged()
+        clock.advance(10)
+        XCTAssertEqual(creations, 1)
+        XCTAssertEqual(output.state, .idle)
+        output.begin()
+        XCTAssertEqual(creations, 2)
+        XCTAssertEqual(output.state, .streaming)
+        output.stop()
+    }
+
+    func testDrainDeadlineFailsAndReleasesOnceEvenIfPlaybackCompletesLate() async {
+        let playback = Playback()
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
+        output.prepareForPress()
+        output.begin()
+        output.append(Array(repeating: 1, count: 1_600))
+        output.end()
+        var releases = 0
+        output.releaseWhenFinished { releases += 1 }
+        clock.advance(1.099)
+        XCTAssertEqual(output.state, .draining)
+        XCTAssertEqual(releases, 0)
+        clock.advance(0.001)
+        XCTAssertEqual(output.state, .failed("遥控器音频输出超时"))
+        XCTAssertEqual(releases, 1)
+        XCTAssertEqual(output.queuedSamples, 0)
+        playback.completeAll()
+        await drainMainQueue()
+        clock.advance(10)
+        XCTAssertEqual(output.deliveredSamples, 0)
+        XCTAssertEqual(releases, 1)
+        output.stop()
+    }
+
+    func testFlushFailureDuringPreparationOrWarmReuseFailsWithoutSchedulingAudio() {
+        for reuseWarmPlayer in [false, true] {
+            let playback = Playback()
+            let clock = TestClock()
+            let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
+            if reuseWarmPlayer { output.warmUp() }
+            playback.flushError = RemoteMicrophoneOutput.outputError("无法清除旧音频")
+            output.prepareForPress()
+            output.begin()
+            output.append([1, 2])
+            var releases = 0
+            output.releaseWhenFinished { releases += 1 }
+            clock.advance(10)
+            XCTAssertEqual(output.state, .failed("无法清除旧音频"))
+            XCTAssertEqual(output.queuedSamples, 0)
+            XCTAssertTrue(playback.packets.isEmpty)
+            XCTAssertEqual(releases, 1)
+            output.stop()
+        }
+    }
+
+    func testDuplicatePlaybackCompletionCannotConsumeAnotherBuffersSamples() async throws {
+        let playback = Playback()
+        let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
+        output.begin()
+        output.append([1, 2])
+        output.append([3, 4, 5])
+        let first = try XCTUnwrap(playback.completions.first)
+        first()
+        first()
+        await drainMainQueue()
+        XCTAssertEqual(output.deliveredSamples, 2)
+        XCTAssertEqual(output.queuedSamples, 3)
+        output.end()
+        playback.completeAll()
+        await drainMainQueue()
+        clock.advance(0.05)
+        XCTAssertEqual(output.deliveredSamples, 5)
+        XCTAssertEqual(output.queuedSamples, 0)
+        XCTAssertEqual(output.state, .idle)
+        output.stop()
     }
 
     func testEnhancementIsPacketIndependentAndLimitsAfterGain() {
@@ -584,9 +793,14 @@ private final class Playback: RemoteMicrophonePlayback {
     var ready = true
     var isReady: Bool { ready && !isInterrupted }
     var prepareHandler: ((@escaping (Result<Void, Error>) -> Void) -> Void)?
+    var healthHandler: ((@escaping (Bool) -> Void) -> Void)?
     func prepare(completion: @escaping (Result<Void, Error>) -> Void) {
         if let prepareHandler { prepareHandler(completion) }
         else { start(); completion(.success(())) }
+    }
+    func checkHealth(completion: @escaping (Bool) -> Void) {
+        if let healthHandler { healthHandler(completion) }
+        else { completion(isReady) }
     }
     var completions: [() -> Void] = []
     var packets: [[Int16]] = []
@@ -597,6 +811,7 @@ private final class Playback: RemoteMicrophonePlayback {
     func start() { startCount += 1 }
     var acceptsAudio = true
     var flushCount = 0
+    var flushError: Error?
     func schedule(_ pcm: [Int16], completion: @escaping () -> Void) -> Bool {
         guard acceptsAudio, !isInterrupted else { return false }
         packets.append(pcm)
@@ -604,7 +819,10 @@ private final class Playback: RemoteMicrophonePlayback {
         return true
     }
     func stop() {}
-    func flush() { flushCount += 1 }
+    func flush() throws {
+        flushCount += 1
+        if let flushError { throw flushError }
+    }
     func completeAll() {
         let pending = completions
         completions.removeAll()

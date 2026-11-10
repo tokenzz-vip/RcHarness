@@ -110,4 +110,38 @@ final class RemoteArtworkTests: XCTestCase {
         XCTAssertNil(RemoteArtworkView.input(at: CGPoint(x: origin.x + diagonal,
                                                         y: origin.y + diagonal), in: bounds))
     }
+
+    func testGoogleNavigationOutlineFollowsThePhotographedRimAtEverySize() {
+        // Measured on the packaged 392 × 1333 photo. The outer ring is
+        // narrower and centred farther right than the confirmation button.
+        for scale: CGFloat in [0.25, 0.5, 1, 2] {
+            let bounds = CGRect(x: 17, y: 29, width: 392 * scale, height: 1333 * scale)
+            func location(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                CGPoint(x: bounds.minX + x * scale, y: bounds.minY + y * scale)
+            }
+            for (input, rim): (ControllerInput, CGPoint) in [
+                (.dpadUp, CGPoint(x: 176, y: 25)),
+                (.dpadLeft, CGPoint(x: 36, y: 205)),
+                (.dpadDown, CGPoint(x: 176, y: 385)),
+                (.dpadRight, CGPoint(x: 315, y: 205)),
+            ] {
+                let outline = RemoteArtworkView.controlOutline(for: input, in: bounds, artwork: .chromecast)
+                let edge: CGFloat
+                let expected: CGFloat
+                switch input {
+                case .dpadUp: edge = outline.boundingRect.minY; expected = rim.y
+                case .dpadDown: edge = outline.boundingRect.maxY; expected = rim.y
+                case .dpadLeft: edge = outline.boundingRect.minX; expected = rim.x
+                default: edge = outline.boundingRect.maxX; expected = rim.x
+                }
+                let offset = input == .dpadUp || input == .dpadDown ? bounds.minY : bounds.minX
+                XCTAssertEqual((edge - offset) / scale, expected, accuracy: 2)
+            }
+            XCTAssertNil(RemoteArtworkView.input(at: location(26, 205), in: bounds, artwork: .chromecast),
+                         "The body to the left of the navigation ring must not highlight a direction")
+            XCTAssertEqual(RemoteArtworkView.input(at: location(40, 205), in: bounds, artwork: .chromecast), .dpadLeft)
+            XCTAssertNil(RemoteArtworkView.input(at: location(113, 205), in: bounds, artwork: .chromecast),
+                         "The gap around confirmation must remain outside the directional highlight")
+        }
+    }
 }

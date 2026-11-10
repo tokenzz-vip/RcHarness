@@ -1,8 +1,38 @@
+import AppKit
 import XCTest
 @testable import RcHarness
 
 @MainActor
 final class SettingsTests: XCTestCase {
+    func testThemeModeDefaultsToSystemAndRejectsUnknownSavedValues() {
+        let suite = "RcHarness.ThemeTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).themeMode, .system)
+        defaults.set("unknown", forKey: SettingsKeys.themeMode)
+        XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).themeMode, .system)
+        XCTAssertNil(AppThemeMode.system.appearance)
+        XCTAssertEqual(AppThemeMode.light.appearance?.name, .aqua)
+        XCTAssertEqual(AppThemeMode.dark.appearance?.name, .darkAqua)
+    }
+
+    func testThemeModeNotifiesTheAppAndPersistsAcrossLaunches() {
+        let suite = "RcHarness.ThemeTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        var appliedModes: [AppThemeMode] = []
+        model.onThemeModeChange = { appliedModes.append($0) }
+
+        for mode in [AppThemeMode.light, .dark, .system] {
+            model.themeMode = mode
+            XCTAssertEqual(appliedModes.last, mode)
+            XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).themeMode, mode)
+        }
+        XCTAssertEqual(appliedModes, [.light, .dark, .system])
+    }
+
     @MainActor
     func testFreshSettingsOpenTheMainPanelAtLaunch() {
         let suite = "RcHarness.LaunchTests." + UUID().uuidString

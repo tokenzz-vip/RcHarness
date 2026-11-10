@@ -7,10 +7,10 @@ struct ProfilesPage: View {
 
     var body: some View {
         SettingsPanel {
-            HStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    Image(systemName: "rectangle.3.group").foregroundStyle(Color.accentColor)
-                    Text("\(model.remoteProfile.shortName) 的方案").font(.system(size: 15, weight: .semibold))
+            HStack(spacing: SettingsStyle.Spacing.controls) {
+                HStack(spacing: SettingsStyle.Spacing.inline) {
+                    Image(systemName: "rectangle.3.group").foregroundStyle(.secondary)
+                    Text("\(model.remoteProfile.shortName) 的方案").font(SettingsStyle.Typography.panelTitle)
                 }
                 Spacer(minLength: 12)
                 Button("管理绑定") { model.page = .harness }
@@ -20,7 +20,7 @@ struct ProfilesPage: View {
                 .buttonStyle(.borderedProminent)
             }
             Text("仅显示当前遥控器的方案，全局按键也按遥控器分别保存。同一方案可绑定多个 Harness，修改后对所有绑定的 Harness 生效。\n默认方案、内置 Harness 同名方案及已绑定 Harness 的方案不可删除。")
-                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
             Divider()
             ForEach(model.profiles) { profile in
                 if profile.id != model.profiles.first?.id { Divider() }
@@ -30,13 +30,13 @@ struct ProfilesPage: View {
     }
 
     private func row(_ profile: SavedKeyProfile) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "keyboard").foregroundStyle(Color.accentColor)
+        HStack(spacing: SettingsStyle.Spacing.controls) {
+            Image(systemName: "keyboard").foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 7) {
                 Text(model.profileDisplayName(profile)).font(.system(size: 13, weight: .semibold))
                 let harnesses = model.boundHarnesses(for: profile.id)
                 Text(harnesses.isEmpty ? (profile.id == SavedKeyProfile.defaultID ? "未匹配 Harness 时使用" : "未绑定 Harness") : "已绑定：" + harnesses.map(\.name).joined(separator: "、"))
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
@@ -48,7 +48,7 @@ struct ProfilesPage: View {
             .buttonStyle(.borderless)
             .help("复制方案并重命名")
             if model.canDeleteProfile(profile.id) {
-                Button { model.deleteProfile(profile.id) } label: { Image(systemName: "trash") }
+                Button { model.requestDeletion(.profile(profile.id, remoteID: model.remoteProfile.id)) } label: { Image(systemName: "trash") }
                     .buttonStyle(.borderless).foregroundStyle(.secondary).help("删除未绑定的方案")
             }
         }

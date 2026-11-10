@@ -2,39 +2,22 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-// Shared sizing, surfaces and typography for every settings page.
-enum SettingsStyle {
-    static let sidebarWidth: CGFloat = 108
-    static let pagePadding: CGFloat = 22
-    static let panelRadius: CGFloat = 18
-    static let subtle = Color.primary.opacity(0.035)
-    // Stronger contrast for the actionable cells inside mapping cards.
-    static func mappingTriggerBackground(in colorScheme: ColorScheme, configured: Bool = true) -> Color {
-        Color.primary.opacity(configured ? (colorScheme == .dark ? 0.12 : 0.115) : 0.035)
-    }
-    static func mappingTriggerLabel(in colorScheme: ColorScheme) -> Color {
-        Color(white: colorScheme == .dark ? 0.72 : 112.0 / 255)
-    }
-    /// Shared by the window and the SwiftUI root so the two never disagree.
-    static let minimumWindowSize = CGSize(width: 1020, height: 772)
-}
-
 struct SettingsPanel<Content: View>: View {
     let title: String
     let symbol: String?
     let contentPadding: EdgeInsets
     @ViewBuilder var content: Content
     init(_ title: String = "", symbol: String? = nil,
-         contentPadding: EdgeInsets = EdgeInsets(top: 20, leading: 20, bottom: 20, trailing: 20),
+         contentPadding: EdgeInsets = SettingsStyle.panelInsets,
          @ViewBuilder content: () -> Content) {
         self.title = title; self.symbol = symbol; self.contentPadding = contentPadding; self.content = content()
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
             if !title.isEmpty {
-                HStack(spacing: 8) {
-                    if let symbol { Image(systemName: symbol).foregroundStyle(Color.accentColor) }
-                    Text(title).font(.system(size: 15, weight: .semibold))
+                HStack(spacing: SettingsStyle.Spacing.inline) {
+                    if let symbol { Image(systemName: symbol).foregroundStyle(.secondary) }
+                    Text(title).font(SettingsStyle.Typography.panelTitle)
                 }
             }
             content
@@ -66,36 +49,13 @@ struct SettingsStatus: View {
     @ViewBuilder
     private var label: some View {
         if let fixedWidth {
-            Text(title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+            Text(title).font(SettingsStyle.Typography.caption.weight(.medium)).lineLimit(1)
                 .padding(.horizontal, 9).padding(.vertical, 5)
                 .frame(width: fixedWidth)
         } else {
-            Text(title).font(.system(size: 11, weight: .medium))
+            Text(title).font(SettingsStyle.Typography.caption.weight(.medium))
                 .padding(.horizontal, 9).padding(.vertical, 5)
                 .fixedSize()
-        }
-    }
-}
-
-struct RemoteProfileMenuItems: View {
-    @ObservedObject var model: RemoteDashboardModel
-
-    var body: some View {
-        ForEach(model.availableRemoteProfiles) { profile in
-            Button {
-                model.selectRemoteProfile(profile.id)
-            } label: {
-                if profile.id == model.remoteProfile.id {
-                    Label(profile.selectionName, systemImage: "checkmark")
-                } else {
-                    Text(profile.selectionName)
-                }
-            }
-            .disabled(profile.id == model.remoteProfile.id)
-        }
-        if model.availableRemoteProfiles.count == 1 {
-            Divider()
-            Text("当前仅支持此型号")
         }
     }
 }
@@ -105,7 +65,7 @@ struct SettingsEmpty: View {
     let title: String
     let detail: String
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: SettingsStyle.Spacing.inline) {
             Image(systemName: symbol).font(.system(size: 32)).foregroundStyle(.tertiary).padding(.bottom, 5)
             Text(title).font(.headline)
             Text(detail).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
@@ -120,11 +80,11 @@ struct SettingsPreference<Control: View>: View {
     let detail: String
     @ViewBuilder var control: Control
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: symbol).font(.title3).foregroundStyle(Color.accentColor).frame(width: 28)
+        HStack(spacing: SettingsStyle.Spacing.controls) {
+            Image(systemName: symbol).font(.title3).foregroundStyle(.secondary).frame(width: 28)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.system(size: 13, weight: .medium))
-                if !detail.isEmpty { Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+                if !detail.isEmpty { Text(detail).font(SettingsStyle.Typography.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: 18)
             control
@@ -152,7 +112,7 @@ enum AppInfo {
     static var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev" }
     static let repository = URL(string: "https://github.com/tokenzz-vip/RcHarness")!
     static let website = URL(string: "https://rcharness.tokenzz.vip")!
-    static let history = URL(string: "https://github.com/tokenzz-vip/RcHarness/commits")!
+    static let history = URL(string: "https://github.com/tokenzz-vip/RcHarness/releases")!
 }
 
 /// File and application pickers. Kept in the view layer so the model only
@@ -219,7 +179,7 @@ enum SettingsDialogs {
         resetButton.hasDestructiveAction = true
         guard present(alert) == .alertSecondButtonReturn else { return }
         guard model.remoteProfile.id == remoteID, model.selectedProfileID == profileID else {
-            model.actionMessage = "当前遥控器或按键方案已切换，未恢复默认映射"
+            model.postNotice("当前遥控器或按键方案已切换，未恢复默认映射", level: .warning)
             return
         }
         model.resetMapping()
@@ -266,7 +226,7 @@ struct ShortcutBindingEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
             HStack {
                 Text(shortcut?.label ?? "尚未设置快捷键").font(.system(size: 13, design: .monospaced))
                 Spacer()

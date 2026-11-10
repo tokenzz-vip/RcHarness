@@ -1,6 +1,15 @@
 import Foundation
 @testable import RcHarness
 
+/// Wait for playback completions already submitted to the main queue, without
+/// advancing timers or relying on the machine's scheduling speed.
+@MainActor
+func drainMainQueue() async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { continuation.resume() }
+    }
+}
+
 /// Deterministic scheduler for controllers that take a
 /// `RemoteVoiceSessionController.Scheduler`; time only moves via `advance`.
 final class TestClock {

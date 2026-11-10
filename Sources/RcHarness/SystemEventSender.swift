@@ -83,7 +83,7 @@ final class SystemEventSender {
     func send(_ mapping: ButtonMapping, pressed: Bool) {
         switch mapping.action {
         case .enter: heldKey(VirtualKey.returnKey, flags: [], pressed: pressed)
-        case .backspace: heldKey(VirtualKey.delete, flags: [], pressed: pressed)
+        case .backspace, .rapidDelete: heldKey(VirtualKey.delete, flags: [], pressed: pressed)
         case .escape: heldKey(VirtualKey.escape, flags: [], pressed: pressed)
         case .arrowUp: heldKey(VirtualKey.upArrow, flags: [], pressed: pressed)
         case .arrowDown: heldKey(VirtualKey.downArrow, flags: [], pressed: pressed)
@@ -123,7 +123,7 @@ final class SystemEventSender {
         case .volumeDown: mediaKey(MediaKey.soundDown, pressed: pressed)
         case .mute: mediaKey(MediaKey.mute, pressed: pressed)
         case .playPause: mediaKey(MediaKey.play, pressed: pressed)
-        case .phrase, .macro, .switchToNativeMode, .openHarnessSwitcher, .disabled: break
+        case .phrase, .macro, .switchToNativeMode, .openHarnessSwitcher, .openPhrases, .disabled: break
         }
     }
 

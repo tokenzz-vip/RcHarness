@@ -32,11 +32,11 @@ final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback {
     var onInterruption: (() -> Void)?
     var isInterrupted: Bool {
         guard graphStarted.withLock({ $0 }) else { return false }
-        return engineQueue.sync { started && !healthy }
+        return AudioPerformance.sync(on: engineQueue, operation: "Playback.isInterrupted") { started && !healthy }
     }
     var isReady: Bool {
         guard graphStarted.withLock({ $0 }) else { return false }
-        return engineQueue.sync { healthy }
+        return AudioPerformance.sync(on: engineQueue, operation: "Playback.isReady") { healthy }
     }
 
     init(outputUID: String, makeEngine: @escaping @Sendable () throws -> AVAudioEngine = { AVAudioEngine() }) throws {
@@ -135,7 +135,7 @@ final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback {
 
     func schedule(_ pcm: [Int16], completion: @escaping () -> Void) -> Bool {
         guard graphStarted.withLock({ $0 }) else { return false }
-        return engineQueue.sync {
+        return AudioPerformance.sync(on: engineQueue, operation: "Playback.schedule") {
             guard healthy,
                   let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(pcm.count)),
                   let samples = buffer.floatChannelData?[0] else { return false }
@@ -171,13 +171,13 @@ final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback {
             engine = nil
             format = nil
         }
-        if wasStarted { engineQueue.sync(execute: cleanup) }
+        if wasStarted { AudioPerformance.sync(on: engineQueue, operation: "Playback.stop", cleanup) }
         else { engineQueue.async(execute: cleanup) }
     }
 
     func flush() throws {
         guard graphStarted.withLock({ $0 }), !isStopRequested else { return }
-        try engineQueue.sync { try flushOnEngineQueue() }
+        try AudioPerformance.sync(on: engineQueue, operation: "Playback.flush") { try flushOnEngineQueue() }
     }
 
     private func flushOnEngineQueue() throws {

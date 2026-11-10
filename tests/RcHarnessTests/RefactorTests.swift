@@ -161,7 +161,11 @@ final class RefactorTests: XCTestCase {
         let exported = directory.appendingPathComponent("export.json")
         model.exportConfiguration(to: exported)
         model.importConfiguration(from: exported)
-        XCTAssertTrue(model.actionMessage.hasPrefix("配置已导入；3 处"))
+        let preview = try XCTUnwrap(model.pendingConfigurationImport)
+        XCTAssertEqual(preview.prepared.danglingReferences, 3)
+        try model.confirmConfigurationImport(preview.id)
+        XCTAssertTrue(model.actionMessage.hasPrefix("配置已导入"))
+        XCTAssertTrue(model.actionMessage.contains("3 处常用语或组合动作引用已失效"))
     }
 
     func testDriverAndAppAgreeOnTheFlushProperty() throws {
@@ -169,6 +173,17 @@ final class RefactorTests: XCTestCase {
         let driver = try String(contentsOf: root.appendingPathComponent("Drivers/RcHarnessMicrophone/Driver.c"), encoding: .utf8)
         let value = String(format: "0x%08x", RcHarnessMicrophoneProtocol.flushProperty)
         XCTAssertTrue(driver.contains("FlushProperty = \(value)"), "Driver.c must define FlushProperty = \(value)")
+    }
+
+    func testAppBundleAllowsSystemLocalizationInNativeFilePanels() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let plistURL = root.appendingPathComponent("Sources/RcHarness/Info.plist")
+        let data = try Data(contentsOf: plistURL)
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+
+        XCTAssertEqual(plist["CFBundleDevelopmentRegion"] as? String, "zh-Hans")
+        XCTAssertEqual(plist["CFBundleLocalizations"] as? [String], ["zh-Hans", "en"])
+        XCTAssertEqual(plist["CFBundleAllowMixedLocalizations"] as? Bool, true)
     }
 
     func testRemoteProfileOwnsHardwareIdentity() {
@@ -191,21 +206,21 @@ final class RefactorTests: XCTestCase {
         let day = UsageSummary(usage: usage, range: .day, now: now)
         XCTAssertEqual(day.pressCount, 2)
         XCTAssertEqual(day.buttonRanking.first?.key, "buttonB")
-        XCTAssertEqual(day.buttonRanking.count, RemoteProfiles.xiaomiRC003.inputs.count)
+        XCTAssertEqual(day.buttonRanking.count, ControllerInput.allCases.count)
         XCTAssertEqual(day.buttonRanking.first { $0.key == ControllerInput.buttonA.rawValue }?.value, 0)
-        XCTAssertEqual(day.chartDays.count, 1)
-        XCTAssertEqual(day.chartDays.first?.count, 2)
+        XCTAssertEqual(day.chartBuckets.count, 1)
+        XCTAssertEqual(day.chartBuckets.first?.count, 2)
         let all = UsageSummary(usage: usage, range: .all, now: now)
         XCTAssertEqual(all.pressCount, 3)
         XCTAssertEqual(all.activeDays, 2)
         XCTAssertEqual(all.sessions.count, 1)
-        XCTAssertEqual(UsageSummary(usage: usage, range: .week, now: now).chartDays.count, 7)
+        XCTAssertEqual(UsageSummary(usage: usage, range: .lastSevenDays, now: now).chartBuckets.count, 7)
     }
 
     func testStatisticsRankingIncludesEveryInputWithoutPresses() {
         for range in StatisticsRange.allCases {
             let summary = UsageSummary(usage: LocalUsage(), range: range)
-            XCTAssertEqual(Set(summary.buttonRanking.map(\.key)), Set(RemoteProfiles.xiaomiRC003.inputs.map(\.rawValue)))
+            XCTAssertEqual(Set(summary.buttonRanking.map(\.key)), Set(ControllerInput.allCases.map(\.rawValue)))
             XCTAssertTrue(summary.buttonRanking.allSatisfy { $0.value == 0 })
             XCTAssertEqual(summary.buttonRanking.map(\.key), summary.buttonRanking.map(\.key).sorted())
             XCTAssertEqual(summary.pressCount, 0)
@@ -213,7 +228,7 @@ final class RefactorTests: XCTestCase {
         }
     }
 
-    func testStatisticsVoiceRankingFollowsSupportedInputs() {
+    func testStatisticsVoiceRankingUsesAFixedLimitForAllRemotes() {
         var usage = LocalUsage()
         let now = Date()
         let old = Calendar.current.date(byAdding: .day, value: -30, to: now)!
@@ -221,18 +236,13 @@ final class RefactorTests: XCTestCase {
             usage.recordVoice(seconds: Double(seconds), at: now)
             usage.recordVoice(seconds: Double(seconds + 100), at: old)
         }
-        let inputs = RemoteProfiles.xiaomiRC003.inputs
-        let day = UsageSummary(usage: usage, range: .day, inputs: inputs, now: now)
-        XCTAssertEqual(day.rankedSessions.count, inputs.count)
+        let day = UsageSummary(usage: usage, range: .day, now: now)
+        XCTAssertEqual(day.rankedSessions.count, UsageSummary.voiceRankingLimit)
         XCTAssertEqual(day.rankedSessions.first?.seconds, 20)
-        XCTAssertEqual(day.rankedSessions.last?.seconds, 8)
-        let all = UsageSummary(usage: usage, range: .all, inputs: inputs, now: now)
-        XCTAssertEqual(all.rankedSessions.count, inputs.count)
+        XCTAssertEqual(day.rankedSessions.last?.seconds, 6)
+        let all = UsageSummary(usage: usage, range: .all, now: now)
+        XCTAssertEqual(all.rankedSessions.count, UsageSummary.voiceRankingLimit)
         XCTAssertEqual(all.rankedSessions.first?.seconds, 120)
-        let fewerInputs = Array(inputs.prefix(3))
-        let smaller = UsageSummary(usage: usage, range: .day, inputs: fewerInputs, now: now)
-        XCTAssertEqual(smaller.rankedSessions.map(\.seconds), [20, 19, 18])
-        XCTAssertEqual(Set(smaller.buttonRanking.map(\.key)), Set(fewerInputs.map(\.rawValue)))
         XCTAssertTrue(UsageSummary(usage: LocalUsage(), range: .day).rankedSessions.isEmpty)
     }
 }

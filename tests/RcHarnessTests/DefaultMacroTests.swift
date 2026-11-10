@@ -18,6 +18,27 @@ final class DefaultMacroTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
+    func testMappingCardTitlesDistinguishRecentChatsAndPreserveFullNames() throws {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        let first = try XCTUnwrap(model.macros.first { $0.name == "Codex-转到最近聊天1" })
+        let second = try XCTUnwrap(model.macros.first { $0.name == "Codex-转到最近聊天2" })
+        XCTAssertEqual(DefaultMacros.cardTitle(for: first), "转到最近聊天1")
+        XCTAssertEqual(DefaultMacros.cardTitle(for: second), "转到最近聊天2")
+        XCTAssertEqual(model.mappingTitle(ButtonMapping(action: .macro, referenceID: first.id.uuidString)), "Codex-转到最近聊天1")
+        XCTAssertEqual(model.macros.first { $0.id == first.id }?.name, first.name)
+    }
+
+    func testMappingCardTitlesKeepCustomAndRenamedMacroNames() throws {
+        var renamed = try XCTUnwrap(DefaultMacros.codex.first)
+        renamed.name = "Codex-我的自定义动作"
+        XCTAssertEqual(DefaultMacros.cardTitle(for: renamed), renamed.name)
+        let custom = SavedMacro(name: "Codex-新建会话")
+        XCTAssertEqual(DefaultMacros.cardTitle(for: custom), custom.name)
+        for macro in allPresets {
+            XCTAssertFalse(DefaultMacros.cardTitle(for: macro).isEmpty)
+        }
+    }
+
     func testFreshInstallProvidesExecutableAppShortcutsWithoutChangingBindings() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(model.macros, allPresets)

@@ -330,8 +330,8 @@ final class VoiceSessionTests: XCTestCase {
     @MainActor
     func testRealOutputDrainsBeforeTheStopTapWhenHIDReleasePrecedesBLEStart() async throws {
         let playback = SessionPlayback()
-        let output = RemoteMicrophoneOutput(makePlayback: { playback })
         let clock = TestClock()
+        let output = RemoteMicrophoneOutput(schedule: clock.schedule, makePlayback: { playback })
         var edges: [Bool] = []
         let controller = RemoteVoiceSessionController(output: output, schedule: clock.schedule, logger: { _ in }) {
             _, down in edges.append(down)
@@ -346,7 +346,10 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(output.queuedSamples, 3)
         XCTAssertEqual(playback.packets, [[1, 2, 3]])
         playback.completions.forEach { $0() }
-        try await Task.sleep(nanoseconds: 150_000_000)
+        await drainMainQueue()
+        clock.advance(0.049)
+        XCTAssertEqual(edges, [true, false])
+        clock.advance(0.001)
         XCTAssertEqual(output.deliveredSamples, 3)
         XCTAssertEqual(edges, [true, false, true])
         clock.advance(0.12)

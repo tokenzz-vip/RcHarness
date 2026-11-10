@@ -139,15 +139,23 @@ struct RemoteArtworkView: View {
             let origin = CGPoint(x: bounds.minX + navigation.x * bounds.width,
                                  y: bounds.minY + navigation.y * bounds.height)
             if !artwork.isXiaomi {
-                // Perspective in the photo makes the navigation ring elliptical.
+                // The photographed outer rim is narrower and offset to the
+                // right of confirmation. Calibrate each ellipse separately;
+                // scaling both around confirmation spills onto the left body.
+                let outer = CGAffineTransform(a: bounds.width * 0.356, b: 0, c: 0,
+                                              d: bounds.height * 0.135,
+                                              tx: bounds.minX + bounds.width * 0.448, ty: origin.y)
+                let inner = CGAffineTransform(a: bounds.width * 0.139, b: 0, c: 0,
+                                              d: bounds.height * 0.051, tx: origin.x, ty: origin.y)
                 var sector = Path()
                 sector.addArc(center: .zero, radius: 1,
-                              startAngle: .degrees(angle - 42), endAngle: .degrees(angle + 42), clockwise: false)
-                sector.addArc(center: .zero, radius: 0.37,
-                              startAngle: .degrees(angle + 42), endAngle: .degrees(angle - 42), clockwise: true)
+                              startAngle: .degrees(angle - 42), endAngle: .degrees(angle + 42),
+                              clockwise: false, transform: outer)
+                sector.addArc(center: .zero, radius: 1,
+                              startAngle: .degrees(angle + 42), endAngle: .degrees(angle - 42),
+                              clockwise: true, transform: inner)
                 sector.closeSubpath()
-                return sector.applying(CGAffineTransform(a: bounds.width * 0.375, b: 0, c: 0,
-                                                        d: bounds.height * 0.135, tx: origin.x, ty: origin.y))
+                return sector
             }
             var sector = Path()
             sector.addArc(center: origin, radius: bounds.width * 0.415,

@@ -45,9 +45,9 @@ struct MappingPage: View {
     let onRenameProfile: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: SettingsStyle.Spacing.controls) {
             SettingsPanel {
-                HStack(spacing: 12) {
+                HStack(spacing: SettingsStyle.Spacing.controls) {
                     Picker("按键方案", selection: Binding(get: { model.selectedProfileID }, set: { model.activateProfile($0) })) {
                         ForEach(model.profiles) { profile in Text(model.profileDisplayName(profile)).tag(Optional(profile.id)) }
                     }
@@ -94,7 +94,7 @@ private struct MappingCanvas: View {
                     VStack(spacing: layout.cardSpacing) {
                         ForEach(layout.leftInputs, id: \.self) { mappingCard($0, layout: layout) }
                     }.frame(width: columnWidth)
-                    VStack(spacing: 12) {
+                    VStack(spacing: SettingsStyle.Spacing.controls) {
                         LiveRemoteArtwork(
                             live: live,
                             highlightedInput: hoveredArtworkInput ?? hoveredCardInput ?? model.selectedInput,
@@ -169,9 +169,9 @@ private struct MappingCanvas: View {
             }.padding(8 * layout.contentScale).frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: layout.cardHeight)
                 .background(emphasizedInputs.contains(input) ? Color.accentColor.opacity(0.09) : SettingsStyle.subtle,
-                            in: RoundedRectangle(cornerRadius: 11))
+                            in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 11)
+                    RoundedRectangle(cornerRadius: SettingsStyle.controlRadius)
                         .strokeBorder(emphasizedInputs.contains(input) ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.06))
                 }
         }.buttonStyle(.plain)
@@ -218,8 +218,8 @@ private struct MappingCanvas: View {
         .padding(.vertical, 4 * layout.contentScale)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: layout.cardHeight)
-        .background(selected ? Color.accentColor.opacity(0.09) : SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: 11))
-        .overlay { RoundedRectangle(cornerRadius: 11).strokeBorder(selected ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.07)) }
+        .background(selected ? Color.accentColor.opacity(0.09) : SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
+        .overlay { RoundedRectangle(cornerRadius: SettingsStyle.controlRadius).strokeBorder(selected ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.07)) }
     }
 
     private func cardTitle(_ mapping: ButtonMapping) -> String {
@@ -227,6 +227,12 @@ private struct MappingCanvas: View {
         case .openHarnessSwitcher: "Harness 列表"
         case .screenshot: "区域截图 ⌘⇧4"
         case .switchToNativeMode: "原生模式"
+        case .macro:
+            if let macro = model.macros.first(where: { $0.id.uuidString == mapping.referenceID }) {
+                DefaultMacros.cardTitle(for: macro)
+            } else {
+                model.mappingTitle(mapping)
+            }
         default: model.mappingTitle(mapping)
         }
     }
@@ -243,7 +249,7 @@ private struct ProfileBindingStatus: View {
                         .frame(width: 20, height: 20)
                         .background(Color(nsColor: .controlBackgroundColor), in: Circle())
                         .overlay { Circle().stroke(Color.primary.opacity(0.12), lineWidth: 1) }
-                    Text("未绑定 Harness").font(.system(size: 11))
+                    Text("未绑定 Harness").font(SettingsStyle.Typography.caption)
                 }
                 .foregroundStyle(.secondary)
             } else {
@@ -295,16 +301,17 @@ struct MappingFooter: View {
     @ObservedObject var model: RemoteDashboardModel
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: SettingsStyle.Spacing.groups) {
             Label(model.isConnected ? "按键功能已连接" : "等待遥控器连接", systemImage: "keyboard")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             Divider().frame(height: 30)
             Button("设置全局按键") { model.page = .about }
             Spacer()
             Button("常用语") { model.page = .phrases }
-            Button("恢复当前方案…") { SettingsDialogs.resetMapping(model) }
+                .help("管理常用语和方向键分配")
+            Button("恢复当前方案") { SettingsDialogs.resetMapping(model) }
         }
-        .padding(.horizontal, 20).padding(.vertical, 16)
+        .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, SettingsStyle.Spacing.groups)
         .background(.regularMaterial)
         .overlay(alignment: .top) { Divider() }
     }
@@ -322,24 +329,24 @@ struct MappingEditorSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: SettingsStyle.Spacing.controls) {
                 Image(systemName: model.selectedInput.symbol)
                     .font(.system(size: 22)).foregroundStyle(Color.accentColor)
                     .frame(width: 44, height: 44)
-                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                 VStack(alignment: .leading, spacing: 5) {
                     Text("\(model.selectedInput.label) · \(model.selectedInput == .options ? "语音模式" : model.selectedTrigger.title)")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(SettingsStyle.Typography.dialogTitle)
                     Text(model.selectedInput == .options ? "固定语音触发 · 对当前遥控器的所有方案和 Harness 生效" :
                          model.isGlobalInput(model.selectedInput) ? "全局按键 · 对当前遥控器的所有方案和 Harness 生效" : "按键方案：\(model.activeMappingName)")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(24)
+            .padding(SettingsStyle.pagePadding)
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
                     Text(model.selectedInput == .options ? "两种模式分别绑定快捷键，请与语音工具的设置保持一致。" : "选择这个按键要执行的操作")
                         .font(.callout).foregroundStyle(.secondary)
                     if model.selectedInput == .options {
@@ -364,7 +371,7 @@ struct MappingEditorSheet: View {
                             .id(model.selectedTrigger)
                     }
                 }
-                .padding(24)
+                .padding(SettingsStyle.pagePadding)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             Divider()
@@ -374,7 +381,7 @@ struct MappingEditorSheet: View {
                 Button("完成") { model.editorVisible = false }
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 24).padding(.vertical, 16)
+            .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, 16)
         }
         .frame(width: 560, height: model.selectedInput == .options ? 560 : 420)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -383,7 +390,7 @@ struct MappingEditorSheet: View {
 
     private func voiceModeCard(_ mode: VoiceTriggerMode, title: String, detail: String, shortcut: Binding<RecordedShortcut>) -> some View {
         let unavailable = mode == .tap && !model.remoteProfile.supportsVoiceTap
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
             HStack {
                 Button { model.voiceMode = mode } label: {
                     Label(title, systemImage: model.voiceMode == mode ? "largecircle.fill.circle" : "circle")
@@ -400,8 +407,8 @@ struct MappingEditorSheet: View {
                 set: { capturingVoiceMode = $0 ? mode : nil }
             ))
         }
-        .padding(14)
-        .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: 10))
+        .padding(SettingsStyle.controlPadding)
+        .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
     }
 }
 
@@ -521,8 +528,8 @@ struct ActionMappingEditor: View {
     var parentMacroID: UUID? = nil
     @State private var capturing = false
     private var actions: [RemoteAction] {
-        let basic: [RemoteAction] = [.enter, .backspace, .escape, .arrowUp, .arrowDown, .arrowLeft, .arrowRight, .copy, .paste, .browserBack, .browserForward]
-        let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .screenshot, .mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown] + (parentMacroID == nil ? [.switchToNativeMode, .openHarnessSwitcher] : [])
+        let basic: [RemoteAction] = [.enter, .backspace, .rapidDelete, .escape, .arrowUp, .arrowDown, .arrowLeft, .arrowRight, .copy, .paste, .browserBack, .browserForward]
+        let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .screenshot, .mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown] + (parentMacroID == nil ? [.switchToNativeMode, .openHarnessSwitcher, .openPhrases] : [])
         let custom: [RemoteAction] = [.recordedShortcut, .openApplication, .phrase, .macro]
         switch filter {
         case .basic: return basic + [.disabled]
@@ -532,11 +539,15 @@ struct ActionMappingEditor: View {
         }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
             Picker("执行动作", selection: Binding(get: { value.action }, set: { value = ButtonMapping(action: $0) })) {
                 if !actions.contains(value.action) { Text(value.action.label).tag(value.action) }
                 ForEach(actions) { action in Text(action.label).tag(action) }
-            }.font(.system(size: 12))
+            }.font(SettingsStyle.Typography.body)
+            if value.action == .rapidDelete {
+                Text("按住连续退格，松开即停止。可绑定到长按手势，保留单击的原有动作；双击或组合动作中执行一次退格。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if value.action == .switchToNativeMode {
                 Text("关闭遥控器映射，恢复原生按键。返回映射模式时，请在主面板开启「启用遥控器映射」，或点击菜单栏的模式项。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -545,13 +556,17 @@ struct ActionMappingEditor: View {
                 Text("展示已启用且正在运行的 Harness。左右选择，确认 OK 切换应用，返回或主页关闭列表。")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if value.action == .openPhrases {
+                Text("唤出独立常用语浮层。上下左右和确认键各对应一条常用语，单击输入内容1，双击输入内容2；返回或主页关闭。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if value.action == .recordedShortcut {
                 ShortcutBindingEditor(shortcut: $value.shortcut, capturing: $capturing)
             }
             if value.action == .openApplication {
                 HStack {
                     Text(value.applicationPath.map { URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent } ?? "尚未选择 App")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
                     Spacer()
                     Button("选择 App…") { if let url = FilePanels.chooseApplication() { value.applicationPath = url.path } }
                 }

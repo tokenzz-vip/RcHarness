@@ -224,14 +224,14 @@ enum ControllerInput: String, Hashable, CaseIterable, Codable {
 enum ControllerOperationMode: Hashable { case mapping, native }
 
 enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
-    case enter, backspace, escape, arrowUp, arrowDown, arrowLeft, arrowRight
+    case enter, backspace, rapidDelete, escape, arrowUp, arrowDown, arrowLeft, arrowRight
     // Preserve the stored value used by existing mappings and backups.
     case switchToNativeMode = "toggleMode"
     case rightCommand, screenshot, copy, paste, browserBack, browserForward
     case mouseLeft, mouseRight, pointerUp, pointerDown, pointerLeft, pointerRight
     case scrollUp, scrollDown, volumeUp, volumeDown, recordedShortcut, openApplication, disabled
     case leftCommand, fn, leftOption, rightOption, playPause, mute, phrase, macro
-    case openHarnessSwitcher
+    case openHarnessSwitcher, openPhrases
 
     static let voiceTriggerActions: [Self] = [.fn, .leftCommand, .rightCommand, .leftOption, .rightOption]
 
@@ -240,6 +240,7 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
         switch self {
         case .enter: "Enter"
         case .backspace: "Backspace"
+        case .rapidDelete: "快速删除（按住连续退格）"
         case .escape: "Escape"
         case .arrowUp: "方向键 ↑"
         case .arrowDown: "方向键 ↓"
@@ -274,8 +275,13 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
         case .phrase: "输入常用语"
         case .macro: "执行组合动作"
         case .openHarnessSwitcher: "打开运行 Harness 列表"
+        case .openPhrases: "唤出常用语"
         }
     }
+}
+
+enum PhraseLanguage: String, Codable {
+    case chinese, english
 }
 
 /// A keyboard shortcut recorded in the mapping editor. Named to avoid

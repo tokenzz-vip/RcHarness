@@ -44,12 +44,14 @@ final class AudioDeviceCatalog: @unchecked Sendable {
     }
 
     func devices() -> [Device] {
-        lock.lock()
-        defer { lock.unlock() }
-        if let cached { return cached }
-        let devices = Self.enumerate()
-        cached = devices
-        return devices
+        AudioPerformance.measure("Catalog.devices") {
+            lock.lock()
+            defer { lock.unlock() }
+            if let cached { return cached }
+            let devices = AudioPerformance.measure("Catalog.enumerate") { Self.enumerate() }
+            cached = devices
+            return devices
+        }
     }
 
     func device(uid: String) -> Device? { devices().first { $0.uid == uid } }
@@ -63,9 +65,11 @@ final class AudioDeviceCatalog: @unchecked Sendable {
     }
 
     func invalidate() {
-        lock.lock()
-        cached = nil
-        lock.unlock()
+        AudioPerformance.measure("Catalog.invalidate") {
+            lock.lock()
+            cached = nil
+            lock.unlock()
+        }
     }
 
     private static var devicesAddress: AudioObjectPropertyAddress {

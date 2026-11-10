@@ -125,6 +125,7 @@ final class XiaomiRemoteHIDManager {
     private var manager: IOHIDManager?
     private var parsers: [ObjectIdentifier: XiaomiRemoteHIDParser] = [:]
     private(set) var isConnected = false
+    private(set) var connectedProfileIDs: Set<String> = []
     private var connectedDevices: Set<ObjectIdentifier> = []
     private var inputState = RemoteInputState<ObjectIdentifier>()
     private var modelNumber: String?
@@ -148,6 +149,7 @@ final class XiaomiRemoteHIDManager {
     }
 
     var onConnectionChange: ((Bool) -> Void)?
+    var onProfileConnectionsChange: ((Set<String>) -> Void)?
     var onButtonInput: ((ControllerInput, Bool) -> Void)?
     var onButtonCancelled: ((ControllerInput) -> Void)?
     var onSuppressionFailure: ((String) -> Void)? {
@@ -163,12 +165,9 @@ final class XiaomiRemoteHIDManager {
     func start() {
         guard manager == nil else { return }
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
-        // Observe inactive Xiaomi arrivals too, so the guard protects their
-        // system voice keys even while a Chromecast profile is selected.
-        // updateDevice still accepts input only from the selected profile.
-        let observedProfiles = profiles + RemoteProfiles.all.filter { candidate in
-            candidate.adapter == .xiaomi && !profiles.contains { $0.id == candidate.id }
-        }
+        // Observe every supported model for menu presence. Only the selected
+        // profiles may own input; the guard also protects inactive voice keys.
+        let observedProfiles = presenceProfiles
         let matching = observedProfiles.flatMap(\.hidMatching)
         guard !matching.isEmpty else { return }
         IOHIDManagerSetDeviceMatchingMultiple(manager, matching as CFArray)
@@ -237,6 +236,7 @@ final class XiaomiRemoteHIDManager {
         )
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = nil
+        updateConnectedProfiles([])
         connectedDevices.removeAll()
         inputState.reset()
         parsers.removeAll()
@@ -251,9 +251,32 @@ final class XiaomiRemoteHIDManager {
     }
 
     private func refreshDevices() {
-        guard let manager, let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice> else { return }
+        guard let manager else { return }
+        let devices = (IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>) ?? []
+        let snapshot = devices.map { device in
+            RemoteHIDPresence.Device(
+                vendorID: (IOHIDDeviceGetProperty(device, kIOHIDVendorIDKey as CFString) as? NSNumber)?.intValue,
+                productID: (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? NSNumber)?.intValue,
+                name: IOHIDDeviceGetProperty(device, kIOHIDProductKey as CFString) as? String,
+                modelNumber: RemoteHIDIdentity.modelNumber(entry: IOHIDDeviceGetService(device)),
+                physicalID: (IOHIDDeviceGetProperty(device, "PhysicalDeviceUniqueID" as CFString) as? String)
+                    ?? (IOHIDDeviceGetProperty(device, kIOHIDLocationIDKey as CFString) as? NSNumber)?.stringValue
+                    ?? String(describing: ObjectIdentifier(device)))
+        }
+        updateConnectedProfiles(RemoteHIDPresence.connectedProfiles(devices: snapshot, profiles: presenceProfiles,
+                                                                   confirmedModelNumber: modelNumber))
         for device in devices { updateDevice(device, candidates: devices) }
         volumeGuard.update(mapping: operationMode == .mapping)
+    }
+
+    private var presenceProfiles: [RemoteProfile] {
+        profiles + RemoteProfiles.all.filter { candidate in !profiles.contains { $0.id == candidate.id } }
+    }
+
+    private func updateConnectedProfiles(_ ids: Set<String>) {
+        guard connectedProfileIDs != ids else { return }
+        connectedProfileIDs = ids
+        onProfileConnectionsChange?(ids)
     }
 
     private func updateDevice(_ device: IOHIDDevice, candidates: Set<IOHIDDevice>) {

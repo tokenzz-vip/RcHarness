@@ -4,7 +4,7 @@ import Foundation
 enum SettingsPage: String, CaseIterable, Identifiable {
     case mapping, harness, macros, profiles, connection, about, statistics, phrases
     var id: String { rawValue }
-    static let navigation: [Self] = [.harness, .profiles, .mapping, .macros, .connection, .about]
+    static let navigation: [Self] = [.mapping, .harness, .profiles, .macros, .connection, .about]
     var title: String {
         switch self {
         case .mapping: "按键映射"
@@ -205,7 +205,51 @@ struct SavedPhrase: Codable, Identifiable, Equatable {
     var id = UUID()
     var title: String
     var text: String
+    var englishTitle: String = ""
+    var englishText: String = ""
+
+    var displayTitle: String {
+        if !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return title }
+        return englishTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "未命名常用语" : englishTitle
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, text, englishTitle, englishText
+    }
+
+    init(id: UUID = UUID(), title: String, text: String,
+         englishTitle: String = "", englishText: String = "") {
+        self.id = id
+        self.title = title
+        self.text = text
+        self.englishTitle = englishTitle
+        self.englishText = englishText
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        title = try values.decode(String.self, forKey: .title)
+        text = try values.decode(String.self, forKey: .text)
+        // These fields were added after the original Chinese-only format.
+        englishTitle = try values.decodeIfPresent(String.self, forKey: .englishTitle) ?? ""
+        englishText = try values.decodeIfPresent(String.self, forKey: .englishText) ?? ""
+    }
 }
+/// Shared slots for the modal phrase pad, independent of every key profile.
+struct PhraseAssignments: Codable, Equatable {
+    static let inputs: [ControllerInput] = [.dpadUp, .dpadDown, .dpadLeft, .dpadRight, .buttonA]
+    var slots: [String: UUID] = [:]
+
+    subscript(_ input: ControllerInput) -> UUID? {
+        get { slots[input.rawValue] }
+        set {
+            guard Self.inputs.contains(input) else { return }
+            slots[input.rawValue] = newValue
+        }
+    }
+}
+
 struct MacroStep: Codable, Identifiable, Equatable {
     var id = UUID()
     var mapping = ButtonMapping(action: .enter)
@@ -280,12 +324,13 @@ struct LocalUsage: Codable {
     }
 }
 
-struct SettingsBackup: Codable {
+struct SettingsBackup: Codable, Equatable {
     var version = 3
     var mapping: RemoteMapping
     var profiles: [SavedKeyProfile]
     var macros: [SavedMacro]
     var phrases: [SavedPhrase]
+    var phraseAssignments: PhraseAssignments? = nil
     var harnesses: [HarnessConfiguration]? = nil
     var globalButtons: GlobalButtonSettings? = nil
     var macroPresetsVersion: Int? = nil

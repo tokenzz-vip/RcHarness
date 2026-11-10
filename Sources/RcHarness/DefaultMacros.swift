@@ -6,6 +6,16 @@ enum DefaultMacros {
     // Each release adds only its new presets, preserving deletions from older sets.
     static let version = 5
 
+    /// Mapping cards show the action before the app prefix; saved names stay intact.
+    static func cardTitle(for macro: SavedMacro) -> String {
+        guard presetNames[macro.id] == macro.name,
+              let separator = macro.name.firstIndex(of: "-") else { return macro.name }
+        return String(macro.name[macro.name.index(after: separator)...])
+    }
+
+    private static let presetNames = Dictionary(uniqueKeysWithValues:
+        (codex + claude + cursor + deepSeek + workBuddy).map { ($0.id, $0.name) })
+
     // macOS defaults: https://learn.chatgpt.com/docs/reference/commands
     // IDs stay fixed so importing an older backup can recognize renamed presets.
     private static let originalCodex: [SavedMacro] = [

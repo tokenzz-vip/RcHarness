@@ -7,21 +7,21 @@ struct HarnessSettingsView: View {
     @State private var removalCandidate: HarnessConfiguration?
 
     var body: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: SettingsStyle.Spacing.groups) {
             SettingsPanel {
-                HStack(spacing: 8) {
-                    HarnessIcon(size: 15).foregroundStyle(Color.accentColor)
-                    Text("应用 Harness").font(.system(size: 15, weight: .semibold))
+                HStack(spacing: SettingsStyle.Spacing.inline) {
+                    HarnessIcon(size: 15).foregroundStyle(.secondary)
+                    Text("应用 Harness").font(SettingsStyle.Typography.panelTitle)
                 }
                 Text("当前遥控器：\(model.remoteProfile.shortName)。每个 Harness 可为不同遥控器分别绑定方案，同一方案可绑定多个 Harness。")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
                 ForEach(model.harnesses) { harness in
                     Divider()
                     applicationRow(harness)
                 }
             }
             Label("停用会保留方案绑定；移除 Harness 后，按键方案仍会保留。", systemImage: "info.circle")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear(perform: refreshApplications)
@@ -48,15 +48,15 @@ struct HarnessSettingsView: View {
             harness.matches(applicationPath: $0.bundleURL?.path, bundleIdentifier: $0.bundleIdentifier)
         }
         let status = !harness.isEnabled ? "已停用" : running ? "运行中" : url == nil ? "未安装" : "未运行"
-        return HStack(spacing: 14) {
+        return HStack(spacing: SettingsStyle.Spacing.controls) {
             Button {
                 model.activateHarness(harness.id)
             } label: {
-                HStack(spacing: 14) {
+                HStack(spacing: SettingsStyle.Spacing.controls) {
                     applicationIcon(url)
                         .opacity(harness.isEnabled ? 1 : 0.45)
                     VStack(alignment: .leading, spacing: 7) {
-                        HStack(spacing: 8) {
+                        HStack(spacing: SettingsStyle.Spacing.inline) {
                             Text(harness.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                             if model.selectedHarnessID == harness.id { SettingsStatus(title: "当前", color: .accentColor) }
                         }
@@ -64,7 +64,7 @@ struct HarnessSettingsView: View {
                             Circle().fill(harness.isEnabled && running ? Color.green : Color.secondary).frame(width: 5, height: 5)
                             Text(status)
                             if harness.isBuiltIn { Text("· 内置") }
-                        }.font(.system(size: 11)).foregroundStyle(.secondary)
+                        }.font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -117,7 +117,7 @@ struct HarnessSettingsView: View {
             Image(systemName: "app.dashed")
                 .font(.system(size: 24)).foregroundStyle(.secondary)
                 .frame(width: 40, height: 40)
-                .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: 10))
+                .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                 .accessibilityHidden(true)
         }
     }

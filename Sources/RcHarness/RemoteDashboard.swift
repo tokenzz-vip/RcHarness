@@ -11,14 +11,29 @@ import SwiftUI
 /// re-renders only the views that show it.
 @MainActor
 final class RemoteDashboardModel: ObservableObject {
-    @Published var page: SettingsPage = .mapping
+    @Published var page: SettingsPage = .mapping {
+        didSet { if page != oldValue { flushPendingWrites() } }
+    }
+    @Published private(set) var permissionsNavigationRequest: UUID?
+    @Published private(set) var noticeNavigationRequest: ActionNotice.NavigationRequest?
     @Published var isConnected = false
+    @Published private(set) var connectedRemoteProfileIDs: Set<String> = []
     @Published var operationMode: ControllerOperationMode = .mapping
     @Published var voiceStatus = "遥控器麦克风未连接"
     @Published var voiceReady = false
     var voiceDiagnostics = ""
     @Published var isStreaming = false
-    @Published var audioOutputState: RemoteAudioOutputState = .idle
+    @Published var audioOutputState: RemoteAudioOutputState = .idle {
+        didSet {
+            switch audioOutputState {
+            case .failed(let message):
+                postNotice(message, level: .error, recoveryAction: .connection, source: .audioOutput)
+            case .streaming:
+                resolveNotices(from: .audioOutput)
+            default: break // Cancellation/idle does not prove that the fault is fixed.
+            }
+        }
+    }
     @Published var batteryLevel: Float?
     @Published var microphoneInstalled = RemoteMicrophoneOutput.installed
     /// The HAL plug-in exists on disk (it may not be loaded until coreaudiod restarts).
@@ -26,42 +41,67 @@ final class RemoteDashboardModel: ObservableObject {
     @Published var microphoneUpdateAvailable = RemoteMicrophoneInstallation.updateRequired
     @Published private(set) var globalButtons: GlobalButtonSettings {
         didSet {
-            SettingsStorage.save(globalButtons, SettingsKeys.Stored.globalButtons, defaults: defaults)
+            guard !isCommittingConfiguration else { return }
+            settingsWrites.save(globalButtons, SettingsKeys.Stored.globalButtons)
             persistRemoteKeyConfiguration()
             if !isRestoringRemoteConfiguration { onMappingChange?(effectiveMapping) }
         }
     }
     @Published var mapping: RemoteMapping
-    @Published var actionMessage = ""
+    @Published private(set) var actionNotices: [ActionNotice] = []
+    var actionMessage: String { actionNotices.first?.message ?? "" }
+    var actionOpensPermissions: Bool { actionNotices.first?.recoveryAction == .permissions }
+    private let settingsWrites: SettingsWriteBuffer
+    private let noticeSchedule: RemoteVoiceSessionController.Scheduler
+    private var noticeDismissals: [UUID: DispatchWorkItem] = [:]
+    @Published var pendingConfigurationImport: ConfigurationImportPreview?
+    @Published private(set) var configurationRecoveryDate: Date?
+    @Published var pendingDeletion: PendingDeletion?
+    @Published var deletionUndoStack: [DeletedConfigurationObject] = []
     @Published var selectedInput: ControllerInput = .buttonA
     @Published var selectedTrigger: ButtonTrigger = .single
     @Published var editorVisible = false
     /// Only the selected remote's schemes are exposed to editors and pickers.
     @Published private(set) var profiles: [SavedKeyProfile] {
         didSet {
-            SettingsStorage.save(profiles, SettingsKeys.Stored.profiles, defaults: defaults)
+            guard !isCommittingConfiguration else { return }
+            settingsWrites.save(profiles, SettingsKeys.Stored.profiles)
             persistRemoteKeyConfiguration()
         }
     }
-    @Published private(set) var macros: [SavedMacro] { didSet { SettingsStorage.save(macros, SettingsKeys.Stored.macros, defaults: defaults) } }
-    @Published var phrases: [SavedPhrase] { didSet { SettingsStorage.save(phrases, SettingsKeys.Stored.phrases, defaults: defaults) } }
+    @Published private(set) var macros: [SavedMacro] {
+        didSet {
+            guard !isCommittingConfiguration else { return }
+            settingsWrites.debounce(SettingsKeys.Stored.macros) { [weak self] in self?.macros ?? [] }
+        }
+    }
+    @Published var phrases: [SavedPhrase] {
+        didSet {
+            guard !isCommittingConfiguration else { return }
+            settingsWrites.debounce(SettingsKeys.Stored.phrases) { [weak self] in self?.phrases ?? [] }
+        }
+    }
+    @Published var phraseAssignments: PhraseAssignments {
+        didSet { if !isCommittingConfiguration { settingsWrites.save(phraseAssignments, SettingsKeys.Stored.phraseAssignments) } }
+    }
     @Published private(set) var harnesses: [HarnessConfiguration] {
         didSet {
-            SettingsStorage.save(harnesses, SettingsKeys.Stored.harnesses, defaults: defaults)
+            guard !isCommittingConfiguration else { return }
+            settingsWrites.save(harnesses, SettingsKeys.Stored.harnesses)
             persistRemoteKeyConfiguration()
             if !isRestoringRemoteConfiguration { onHarnessesChange?() }
         }
     }
     @Published private(set) var selectedHarnessID: String? {
         didSet {
-            guard selectedHarnessID != oldValue else { return }
+            guard !isCommittingConfiguration, selectedHarnessID != oldValue else { return }
             defaults.set(selectedHarnessID, forKey: SettingsKeys.selectedHarnessID)
             persistRemoteKeyConfiguration()
         }
     }
     @Published private(set) var selectedProfileID: UUID? {
         didSet {
-            guard selectedProfileID != oldValue else { return }
+            guard !isCommittingConfiguration, selectedProfileID != oldValue else { return }
             defaults.set(selectedProfileID?.uuidString, forKey: SettingsKeys.selectedProfileID)
             persistRemoteKeyConfiguration()
         }
@@ -116,6 +156,12 @@ final class RemoteDashboardModel: ObservableObject {
     @Published var showDockIcon: Bool { didSet { defaults.set(showDockIcon, forKey: SettingsKeys.showDockIcon); NSApp.setActivationPolicy(showDockIcon ? .regular : .accessory) } }
     @Published var showKeyProfilePrefix: Bool { didSet { defaults.set(showKeyProfilePrefix, forKey: SettingsKeys.showKeyProfilePrefix) } }
     @Published var openAtLaunch: Bool { didSet { defaults.set(openAtLaunch, forKey: SettingsKeys.openAtLaunch) } }
+    @Published var themeMode: AppThemeMode {
+        didSet {
+            defaults.set(themeMode.rawValue, forKey: SettingsKeys.themeMode)
+            onThemeModeChange?(themeMode)
+        }
+    }
     @Published private(set) var loginEnabled = SMAppService.mainApp.status == .enabled
     @Published var inputGranted = CGPreflightListenEventAccess()
     @Published var accessibilityGranted = AXIsProcessTrusted()
@@ -135,6 +181,7 @@ final class RemoteDashboardModel: ObservableObject {
     private var deviceObserver: NSObjectProtocol?
     private var remoteKeyConfigurations: [String: RemoteKeyConfiguration] = [:]
     private var isRestoringRemoteConfiguration = true
+    private var isCommittingConfiguration = false
     private var isUpdatingKeySelection = false
 
     var onMappingChange: ((RemoteMapping) -> Void)?
@@ -147,13 +194,18 @@ final class RemoteDashboardModel: ObservableObject {
     var onGainChange: ((Double) -> Void)?
     var onVoiceTriggerChange: (() -> Void)?
     var onRemoteProfileChange: ((RemoteProfile) -> Void)?
+    var onThemeModeChange: ((AppThemeMode) -> Void)?
 
     /// - Parameter mapping: used only on first launch, as the default profile's mapping.
     init(mapping: RemoteMapping, defaults: UserDefaults = .standard, remoteProfile: RemoteProfile = RemoteProfiles.xiaomiRC003,
          availableRemoteProfiles: [RemoteProfile] = RemoteProfiles.all,
-         monotonicTime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+         monotonicTime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         noticeSchedule: @escaping RemoteVoiceSessionController.Scheduler = RemoteVoiceSessionController.mainQueue,
+         settingsSchedule: @escaping RemoteVoiceSessionController.Scheduler = RemoteVoiceSessionController.mainQueue) {
         self.defaults = defaults
         self.monotonicTime = monotonicTime
+        self.noticeSchedule = noticeSchedule
+        self.settingsWrites = SettingsWriteBuffer(defaults: defaults, schedule: settingsSchedule)
         self.availableRemoteProfiles = availableRemoteProfiles.contains(where: { $0.id == remoteProfile.id })
             ? availableRemoteProfiles : [remoteProfile] + availableRemoteProfiles
         let remoteProfile = self.availableRemoteProfiles.first { $0.id == defaults.string(forKey: SettingsKeys.selectedRemoteProfileID) } ?? remoteProfile
@@ -165,6 +217,7 @@ final class RemoteDashboardModel: ObservableObject {
         profiles = SettingsStorage.load([SavedKeyProfile].self, SettingsKeys.Stored.profiles, defaults: defaults) ?? []
         macros = SavedMacro.normalizingNames(in: SettingsStorage.load([SavedMacro].self, SettingsKeys.Stored.macros, defaults: defaults) ?? [])
         phrases = SettingsStorage.load([SavedPhrase].self, SettingsKeys.Stored.phrases, defaults: defaults) ?? []
+        phraseAssignments = SettingsStorage.load(PhraseAssignments.self, SettingsKeys.Stored.phraseAssignments, defaults: defaults) ?? PhraseAssignments()
         usageStore = UsageStore(defaults: defaults)
         harnesses = SettingsStorage.load([HarnessConfiguration].self, SettingsKeys.Stored.harnesses, defaults: defaults) ?? HarnessConfiguration.defaults
         selectedHarnessID = defaults.string(forKey: SettingsKeys.selectedHarnessID)
@@ -174,6 +227,7 @@ final class RemoteDashboardModel: ObservableObject {
         showDockIcon = defaults.object(forKey: SettingsKeys.showDockIcon) as? Bool ?? true
         showKeyProfilePrefix = defaults.bool(forKey: SettingsKeys.showKeyProfilePrefix)
         openAtLaunch = defaults.object(forKey: SettingsKeys.openAtLaunch) as? Bool ?? true
+        themeMode = defaults.string(forKey: SettingsKeys.themeMode).flatMap(AppThemeMode.init(rawValue:)) ?? .system
         selectedProfileID = defaults.string(forKey: SettingsKeys.selectedProfileID).flatMap(UUID.init(uuidString:))
         let legacyBindings = defaults.integer(forKey: SettingsKeys.profileBindingsVersion) < 2
         let hasSavedConfiguration = SettingsStorage.contains(SettingsKeys.Stored.harnesses, defaults: defaults)
@@ -183,35 +237,39 @@ final class RemoteDashboardModel: ObservableObject {
             || SettingsStorage.contains(SettingsKeys.Stored.legacyBaseMapping, defaults: defaults)
             || RemoteProfiles.all.contains { SettingsStorage.contains(SettingsKeys.Stored.legacyMapping(profileID: $0.id), defaults: defaults) }
             || defaults.object(forKey: SettingsKeys.voiceFnTap) != nil
-        initializeDefaultMacros(version: defaults.integer(forKey: SettingsKeys.macroPresetsVersion))
-        remoteKeyConfigurations = SettingsStorage.load([String: RemoteKeyConfiguration].self,
-                                                       SettingsKeys.Stored.remoteKeyConfigurations, defaults: defaults)?.mapValues { $0.normalized() } ?? [:]
-        let remoteConfiguration = remoteKeyConfigurations[remoteProfile.id]
-        if remoteConfiguration != nil || !remoteKeyConfigurations.isEmpty {
-            restoreRemoteKeyConfiguration(remoteConfiguration)
+        settingsWrites.batch {
+            initializeDefaultMacros(version: configurationMacroPresetsVersion)
+            initializeDefaultPhrases()
+            remoteKeyConfigurations = SettingsStorage.load([String: RemoteKeyConfiguration].self,
+                                                           SettingsKeys.Stored.remoteKeyConfigurations, defaults: defaults)?.mapValues { $0.normalized() } ?? [:]
+            let remoteConfiguration = remoteKeyConfigurations[remoteProfile.id]
+            if remoteConfiguration != nil || !remoteKeyConfigurations.isEmpty {
+                restoreRemoteKeyConfiguration(remoteConfiguration)
+            }
+            normalizeProfiles(migrateLegacy: remoteKeyConfigurations.isEmpty && legacyBindings && hasSavedConfiguration,
+                              defaultMapping: remoteKeyConfigurations.isEmpty ? legacyDefaultMapping : .defaults)
+            if let harness = harnesses.first(where: { $0.id == selectedHarnessID && $0.isEnabled }),
+               let profile = profiles.first(where: { $0.id == harness.profileID }) {
+                selectedProfileID = profile.id
+                self.mapping = profile.mapping
+            } else {
+                selectedHarnessID = nil
+                let profile = profiles.first(where: { $0.id == selectedProfileID }) ?? profiles[0]
+                selectedProfileID = profile.id
+                self.mapping = profile.mapping
+            }
+            globalButtons = remoteConfiguration?.globalButtons
+                ?? (!remoteKeyConfigurations.isEmpty ? GlobalButtonSettings() : SettingsStorage.load(GlobalButtonSettings.self, SettingsKeys.Stored.globalButtons, defaults: defaults))
+                ?? (hasLegacyGlobalSettings
+                    ? .migrating(self.mapping, voiceFnTap: defaults.bool(forKey: SettingsKeys.voiceFnTap))
+                    : GlobalButtonSettings())
+            globalButtons = globalButtons.normalized(for: remoteProfile)
+            isRestoringRemoteConfiguration = false
+            settingsWrites.save(globalButtons, SettingsKeys.Stored.globalButtons)
+            persistProfileConfiguration()
+            settingsWrites.save(macros, SettingsKeys.Stored.macros)
         }
-        normalizeProfiles(migrateLegacy: remoteKeyConfigurations.isEmpty && legacyBindings && hasSavedConfiguration,
-                          defaultMapping: remoteKeyConfigurations.isEmpty ? legacyDefaultMapping : .defaults)
-        if let harness = harnesses.first(where: { $0.id == selectedHarnessID && $0.isEnabled }),
-           let profile = profiles.first(where: { $0.id == harness.profileID }) {
-            selectedProfileID = profile.id
-            self.mapping = profile.mapping
-        } else {
-            selectedHarnessID = nil
-            let profile = profiles.first(where: { $0.id == selectedProfileID }) ?? profiles[0]
-            selectedProfileID = profile.id
-            self.mapping = profile.mapping
-        }
-        globalButtons = remoteConfiguration?.globalButtons
-            ?? (!remoteKeyConfigurations.isEmpty ? GlobalButtonSettings() : SettingsStorage.load(GlobalButtonSettings.self, SettingsKeys.Stored.globalButtons, defaults: defaults))
-            ?? (hasLegacyGlobalSettings
-                ? .migrating(self.mapping, voiceFnTap: defaults.bool(forKey: SettingsKeys.voiceFnTap))
-                : GlobalButtonSettings())
-        globalButtons = globalButtons.normalized(for: remoteProfile)
-        isRestoringRemoteConfiguration = false
-        SettingsStorage.save(globalButtons, SettingsKeys.Stored.globalButtons, defaults: defaults)
-        persistProfileConfiguration()
-        SettingsStorage.save(macros, SettingsKeys.Stored.macros, defaults: defaults)
+        configurationRecoveryDate = SettingsStorage.configurationRecovery(defaults: defaults)?.date
         refreshDevices()
         deviceObserver = NotificationCenter.default.addObserver(
             forName: .rcHarnessAudioDevicesChanged, object: nil, queue: .main
@@ -219,11 +277,15 @@ final class RemoteDashboardModel: ObservableObject {
     }
 
     deinit {
+        noticeDismissals.values.forEach { $0.cancel() }
         if let deviceObserver { NotificationCenter.default.removeObserver(deviceObserver) }
     }
 
-    /// Writes state that is saved lazily (usage statistics).
-    func flushPendingWrites() { usageStore.flush() }
+    /// Flush before editor focus loss, window close, application exit or sleep.
+    func flushPendingWrites() {
+        settingsWrites.flush()
+        usageStore.flush()
+    }
 
     func setConnected(_ connected: Bool) {
         isConnected = connected
@@ -234,28 +296,40 @@ final class RemoteDashboardModel: ObservableObject {
         }
     }
 
+    func setConnectedRemoteProfiles(_ ids: Set<String>) {
+        let supported = ids.intersection(availableRemoteProfiles.map(\.id))
+        if connectedRemoteProfileIDs != supported { connectedRemoteProfileIDs = supported }
+    }
+
+    func isRemoteConnected(_ profile: RemoteProfile) -> Bool {
+        profile.id == remoteProfile.id ? isConnected : connectedRemoteProfileIDs.contains(profile.id)
+    }
+
     func selectRemoteProfile(_ id: String) {
         guard let profile = availableRemoteProfiles.first(where: { $0.id == id }),
               profile.id != remoteProfile.id else { return }
+        cancelConfigurationImport()
         stopTestTone()
         editorVisible = false
         setConnected(false)
         setVoice(status: "遥控器麦克风未连接", ready: false, battery: nil)
         voiceDiagnostics = ""
-        persistRemoteKeyConfiguration()
-        isRestoringRemoteConfiguration = true
-        remoteProfile = profile
-        restoreRemoteKeyConfiguration(remoteKeyConfigurations[profile.id])
-        normalizeProfiles(migrateLegacy: false, defaultMapping: .defaults)
-        restoreKeySelection()
-        globalButtons = globalButtons.normalized(for: profile)
-        isRestoringRemoteConfiguration = false
-        if !profile.inputs.contains(selectedInput) { selectedInput = .buttonA }
-        defaults.set(profile.id, forKey: SettingsKeys.selectedRemoteProfileID)
-        // The legacy unscoped key must not be reused after a profile switch;
-        // profile-scoped keys retain each model's remembered peripheral.
-        defaults.removeObject(forKey: SettingsKeys.voicePeripheralUUID)
-        persistProfileConfiguration()
+        settingsWrites.batch {
+            persistRemoteKeyConfiguration()
+            isRestoringRemoteConfiguration = true
+            remoteProfile = profile
+            restoreRemoteKeyConfiguration(remoteKeyConfigurations[profile.id])
+            normalizeProfiles(migrateLegacy: false, defaultMapping: .defaults)
+            restoreKeySelection()
+            globalButtons = globalButtons.normalized(for: profile)
+            isRestoringRemoteConfiguration = false
+            if !profile.inputs.contains(selectedInput) { selectedInput = .buttonA }
+            defaults.set(profile.id, forKey: SettingsKeys.selectedRemoteProfileID)
+            // The legacy unscoped key must not be reused after a profile switch;
+            // profile-scoped keys retain each model's remembered peripheral.
+            defaults.removeObject(forKey: SettingsKeys.voicePeripheralUUID)
+            persistProfileConfiguration()
+        }
         onRemoteProfileChange?(profile)
         onHarnessesChange?()
         onMappingChange?(effectiveMapping)
@@ -272,6 +346,7 @@ final class RemoteDashboardModel: ObservableObject {
     func setVoice(status: String, ready: Bool, battery: Float?) {
         if voiceStatus != status { voiceStatus = status }
         if voiceReady != ready { voiceReady = ready }
+        if ready { resolveNotices(from: .voiceConnection) }
         if batteryLevel != battery { batteryLevel = battery }
     }
     func setStreaming(_ active: Bool) {
@@ -351,7 +426,7 @@ final class RemoteDashboardModel: ObservableObject {
             mapping = .defaults
         }
         persistMapping()
-        actionMessage = "已恢复当前按键方案的默认映射"
+        postNotice("已恢复当前按键方案的默认映射", level: .success)
     }
 
     // MARK: Key profiles
@@ -379,13 +454,13 @@ final class RemoteDashboardModel: ObservableObject {
     func saveProfile(name: String) -> Bool {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if let error = profileNameError(name) {
-            if !name.isEmpty { actionMessage = error }
+            if !name.isEmpty { postNotice(error, level: .error) }
             return false
         }
         let profile = SavedKeyProfile(name: name, mapping: mapping)
         profiles.append(profile)
         activateProfile(profile.id)
-        actionMessage = "已创建按键方案「\(profileDisplayName(profile))」"
+        postNotice("已创建按键方案「\(profileDisplayName(profile))」", level: .success)
         return true
     }
     @discardableResult
@@ -395,14 +470,14 @@ final class RemoteDashboardModel: ObservableObject {
         let copy = SavedKeyProfile(name: name, mapping: source.mapping)
         profiles.append(copy)
         activateProfile(copy.id)
-        actionMessage = "已复制按键方案「\(profileDisplayName(copy))」"
+        postNotice("已复制按键方案「\(profileDisplayName(copy))」", level: .success)
         return copy.id
     }
     @discardableResult
     func renameProfile(_ id: UUID, name: String) -> Bool {
         guard let index = profiles.firstIndex(where: { $0.id == id }), id != SavedKeyProfile.defaultID else { return false }
         if let error = profileNameError(name, excluding: id) {
-            actionMessage = error
+            postNotice(error, level: .error)
             return false
         }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -446,7 +521,7 @@ final class RemoteDashboardModel: ObservableObject {
             if profileID != nil { activateHarness(harnessID) }
             else { activateProfile(nil) }
         }
-        actionMessage = profileID == nil ? "已解除 \(harnesses[index].name) 的方案绑定" : "已更新 \(harnesses[index].name) 的按键方案"
+        postNotice(profileID == nil ? "已解除 \(harnesses[index].name) 的方案绑定" : "已更新 \(harnesses[index].name) 的按键方案", level: .success)
         return true
     }
     func activateHarness(_ id: String?) {
@@ -488,7 +563,7 @@ final class RemoteDashboardModel: ObservableObject {
         if let index = harnesses.firstIndex(where: { $0.matches(applicationPath: url.path, bundleIdentifier: identifier) }) {
             harnesses[index].applicationPath = url.path
             harnesses[index].isEnabled = true
-            actionMessage = "「\(harnesses[index].name)」已在 Harness 列表中"
+            postNotice("「\(harnesses[index].name)」已在 Harness 列表中", level: .warning)
             return harnesses[index].id
         }
         let name = bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
@@ -496,14 +571,14 @@ final class RemoteDashboardModel: ObservableObject {
             ?? url.deletingPathExtension().lastPathComponent
         let harness = HarnessConfiguration(id: UUID().uuidString, name: name, bundleIdentifier: identifier, applicationPath: url.path)
         harnesses.append(harness)
-        actionMessage = "已添加 \(name)，请选择要绑定的按键方案"
+        postNotice("已添加 \(name)，请选择要绑定的按键方案", level: .warning)
         return harness.id
     }
     func removeHarness(_ id: String) {
         guard let harness = harnesses.first(where: { $0.id == id }), !harness.isBuiltIn else { return }
         if selectedHarnessID == id { activateProfile(nil) }
         harnesses.removeAll { $0.id == id }
-        actionMessage = "已移除 \(harness.name) Harness"
+        postNotice("已移除 \(harness.name) Harness", level: .success)
     }
     func canDeleteProfile(_ id: UUID) -> Bool {
         guard id != SavedKeyProfile.defaultID,
@@ -512,9 +587,7 @@ final class RemoteDashboardModel: ObservableObject {
         return profile.builtInHarness == nil
     }
     func deleteProfile(_ id: UUID) {
-        guard canDeleteProfile(id) else { return }
-        if selectedProfileID == id { activateProfile(nil) }
-        profiles.removeAll { $0.id == id }
+        deleteConfigurationObject(.profile(id, remoteID: remoteProfile.id))
     }
 
     /// Mapping of the default profile, used when no Harness matches.
@@ -526,73 +599,19 @@ final class RemoteDashboardModel: ObservableObject {
     /// bindings. With `migrateLegacy`, move mappings stored on old Harnesses
     /// and app paths stored on old profiles into profile bindings.
     func normalizeProfiles(migrateLegacy: Bool, defaultMapping: RemoteMapping) {
-        var profileIDs = Set<UUID>()
-        profiles = profiles.filter { profileIDs.insert($0.id).inserted }
-        if let index = profiles.firstIndex(where: { $0.id == SavedKeyProfile.defaultID }) {
-            let fallback = profiles.remove(at: index)
-            profiles.insert(fallback, at: 0)
-        } else {
-            profiles.insert(SavedKeyProfile(id: SavedKeyProfile.defaultID, name: "默认方案", mapping: defaultMapping), at: 0)
+        settingsWrites.batch {
+            let normalized = NormalizedKeyProfiles(profiles: profiles, harnesses: harnesses,
+                selectedHarnessID: selectedHarnessID, macros: macros,
+                migrateLegacy: migrateLegacy, defaultMapping: defaultMapping)
+            profiles = normalized.profiles
+            harnesses = normalized.harnesses
+            selectedHarnessID = normalized.selectedHarnessID
         }
-        if let selected = harnesses.first(where: { $0.id == selectedHarnessID }) {
-            selectedHarnessID = selected.migratingRetiredBuiltIn().id
-        }
-        harnesses = harnesses.map { $0.migratingRetiredBuiltIn() }
-        var harnessIDs = Set<String>()
-        harnesses = harnesses.filter { harnessIDs.insert($0.id).inserted }
-        for index in harnesses.indices {
-            if let id = harnesses[index].profileID,
-               profiles.contains(where: { $0.id == id }) {
-                continue
-            }
-            harnesses[index].profileID = nil
-            if migrateLegacy && (harnesses[index].hasLegacyMapping || harnesses[index].legacyMapping != .defaults) {
-                let profile = SavedKeyProfile(name: harnesses[index].name + " 按键方案", mapping: harnesses[index].legacyMapping)
-                profiles.append(profile)
-                harnesses[index].profileID = profile.id
-            }
-        }
-        // Old profiles could match an app directly. Move that relationship to
-        // a Harness, retaining every profile even when the app already has one.
-        for profileIndex in profiles.indices where !profiles[profileIndex].applicationPath.isEmpty {
-            let path = profiles[profileIndex].applicationPath
-            if migrateLegacy {
-                let url = URL(fileURLWithPath: path)
-                let identifier = Bundle(url: url)?.bundleIdentifier
-                let harnessIndex: Int
-                if let index = harnesses.firstIndex(where: { $0.matches(applicationPath: path, bundleIdentifier: identifier) }) {
-                    harnessIndex = index
-                } else {
-                    harnesses.append(HarnessConfiguration(id: UUID().uuidString, name: url.deletingPathExtension().lastPathComponent,
-                                                         bundleIdentifier: identifier, applicationPath: path))
-                    harnessIndex = harnesses.count - 1
-                }
-                if harnesses[harnessIndex].profileID == nil {
-                    harnesses[harnessIndex].profileID = profiles[profileIndex].id
-                }
-            }
-            profiles[profileIndex].applicationPath = ""
-        }
-        harnesses = HarnessConfiguration.addingNewBuiltIns(to: harnesses)
-        for index in harnesses.indices where !harnesses[index].didInitializeDefaultProfile {
-            guard let name = harnesses[index].initialProfileName else { continue }
-            if harnesses[index].profileID == nil {
-                let profile = SavedKeyProfile(name: uniqueName(name, existingNames: profiles.map(\.name), fallback: name),
-                                              mapping: harnesses[index].defaultMapping(macros: macros))
-                profiles.append(profile)
-                harnesses[index].profileID = profile.id
-            }
-            harnesses[index].didInitializeDefaultProfile = true
-        }
-        // Also repair configurations whose Harness was already migrated to DeepSeek.
-        profiles = SavedKeyProfile.migratingRetiredName(in: profiles,
-            boundProfileID: harnesses.first(where: { $0.id == "deepseek" })?.profileID)
-        profiles = SavedKeyProfile.normalizingNames(in: profiles)
     }
 
     func persistProfileConfiguration() {
-        SettingsStorage.save(profiles, SettingsKeys.Stored.profiles, defaults: defaults)
-        SettingsStorage.save(harnesses, SettingsKeys.Stored.harnesses, defaults: defaults)
+        settingsWrites.save(profiles, SettingsKeys.Stored.profiles)
+        settingsWrites.save(harnesses, SettingsKeys.Stored.harnesses)
         defaults.set(selectedProfileID?.uuidString, forKey: SettingsKeys.selectedProfileID)
         defaults.set(selectedHarnessID, forKey: SettingsKeys.selectedHarnessID)
         defaults.set(2, forKey: SettingsKeys.profileBindingsVersion)
@@ -619,7 +638,7 @@ final class RemoteDashboardModel: ObservableObject {
         guard !isRestoringRemoteConfiguration, !isUpdatingKeySelection else { return }
         let configuration = currentRemoteKeyConfiguration
         remoteKeyConfigurations[remoteProfile.id] = configuration
-        SettingsStorage.save(remoteKeyConfigurations, SettingsKeys.Stored.remoteKeyConfigurations, defaults: defaults)
+        settingsWrites.save(remoteKeyConfigurations, SettingsKeys.Stored.remoteKeyConfigurations)
     }
 
     private func restoreRemoteKeyConfiguration(_ configuration: RemoteKeyConfiguration?) {
@@ -652,36 +671,40 @@ final class RemoteDashboardModel: ObservableObject {
         }
     }
 
-    func beginKeyConfigurationImport(_ configurations: [String: RemoteKeyConfiguration]) {
+    /// The already encoded snapshot is committed before installing these values.
+    /// Runtime consumers receive one notification after every field is consistent.
+    func installConfiguration(_ backup: SettingsBackup, recoveryDate: Date?,
+                              resetDeletionState: Bool = true, notifyVoiceChange: Bool = true) {
+        settingsWrites.discard()
+        isCommittingConfiguration = true
         isRestoringRemoteConfiguration = true
-        remoteKeyConfigurations = configurations.mapValues { $0.normalized() }
-    }
-
-    func finishKeyConfigurationImport(legacyMapping: RemoteMapping, legacyGlobals: GlobalButtonSettings?, migrateLegacy: Bool) {
-        let configuration = remoteKeyConfigurations[remoteProfile.id]
-        if !remoteKeyConfigurations.isEmpty { restoreRemoteKeyConfiguration(configuration) }
-        normalizeProfiles(migrateLegacy: remoteKeyConfigurations.isEmpty && migrateLegacy,
-                          defaultMapping: remoteKeyConfigurations.isEmpty ? legacyMapping : .defaults)
-        globalButtons = (configuration?.globalButtons
-            ?? (!remoteKeyConfigurations.isEmpty ? GlobalButtonSettings() : legacyGlobals)
-            ?? .migrating(defaultMapping, voiceFnTap: voiceFnTap)).normalized(for: remoteProfile)
-        // Import starts at the default scheme; saved device selections are restored on switching.
-        selectedHarnessID = nil
-        selectedProfileID = SavedKeyProfile.defaultID
-        mapping = defaultMapping
+        editorVisible = false
+        remoteKeyConfigurations = backup.remoteKeyConfigurations ?? [:]
+        profiles = backup.profiles
+        macros = backup.macros
+        phrases = backup.phrases
+        phraseAssignments = backup.phraseAssignments ?? PhraseAssignments()
+        harnesses = backup.harnesses ?? HarnessConfiguration.defaults
+        globalButtons = backup.globalButtons ?? GlobalButtonSettings()
+        let current = remoteKeyConfigurations[remoteProfile.id]
+        selectedProfileID = current?.selectedProfileID ?? SavedKeyProfile.defaultID
+        selectedHarnessID = current?.selectedHarnessID
+        mapping = profiles.first { $0.id == selectedProfileID }?.mapping ?? backup.mapping
+        configurationRecoveryDate = recoveryDate
+        if resetDeletionState {
+            pendingDeletion = nil
+            deletionUndoStack.removeAll()
+        }
         isRestoringRemoteConfiguration = false
-        persistProfileConfiguration()
+        isCommittingConfiguration = false
         onMappingChange?(effectiveMapping)
-        onVoiceTriggerChange?()
+        if notifyVoiceChange { onVoiceTriggerChange?() }
         onHarnessesChange?()
     }
 
-    /// Replace configuration wholesale (used by import).
-    func replaceConfiguration(profiles: [SavedKeyProfile], macros: [SavedMacro], phrases: [SavedPhrase], harnesses: [HarnessConfiguration]) {
-        self.profiles = profiles
-        self.macros = SavedMacro.normalizingNames(in: macros)
-        self.phrases = phrases
-        self.harnesses = harnesses
+    var configurationMacroPresetsVersion: Int {
+        SettingsStorage.load(Int.self, SettingsKeys.Stored.macroPresetsVersion, defaults: defaults)
+            ?? defaults.integer(forKey: SettingsKeys.macroPresetsVersion)
     }
 
     // MARK: Macros
@@ -690,7 +713,12 @@ final class RemoteDashboardModel: ObservableObject {
         if version < DefaultMacros.version {
             macros = DefaultMacros.addingMissing(to: macros, since: version)
         }
-        defaults.set(max(version, DefaultMacros.version), forKey: SettingsKeys.macroPresetsVersion)
+        let currentVersion = max(version, DefaultMacros.version)
+        if SettingsStorage.contains(SettingsKeys.Stored.configurationSnapshot, defaults: defaults) {
+            settingsWrites.save(currentVersion, SettingsKeys.Stored.macroPresetsVersion)
+        } else {
+            defaults.set(currentVersion, forKey: SettingsKeys.macroPresetsVersion)
+        }
     }
 
     @discardableResult
@@ -713,7 +741,7 @@ final class RemoteDashboardModel: ObservableObject {
     func renameMacro(_ id: UUID, name: String) -> Bool {
         guard let index = macros.firstIndex(where: { $0.id == id }) else { return false }
         if let error = macroNameError(name, excluding: id) {
-            actionMessage = error
+            postNotice(error, level: .error)
             return false
         }
         macros[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -729,7 +757,7 @@ final class RemoteDashboardModel: ObservableObject {
         guard let index = macros.firstIndex(where: { $0.id == id }) else { return false }
         for step in steps where step.mapping.action == .macro {
             if let childID = step.mapping.referenceID.flatMap(UUID.init(uuidString:)), !canNestMacro(childID, in: id) {
-                actionMessage = "组合动作不能引用自身或形成循环引用"
+                postNotice("组合动作不能引用自身或形成循环引用", level: .error)
                 return false
             }
         }
@@ -738,7 +766,7 @@ final class RemoteDashboardModel: ObservableObject {
     }
 
     func deleteMacro(_ id: UUID) {
-        macros.removeAll { $0.id == id }
+        deleteConfigurationObject(.macro(id))
     }
 
     func mappingTitle(_ value: ButtonMapping) -> String {
@@ -749,11 +777,107 @@ final class RemoteDashboardModel: ObservableObject {
         return value.action == .disabled ? "未设置" : value.action.label
     }
 
+    // MARK: Phrases
+
+    private func initializeDefaultPhrases() {
+        if !defaults.bool(forKey: SettingsKeys.aiPhrasePresetsInitialized) {
+            phrases = DefaultPhrases.addingMissing(to: phrases)
+            defaults.set(true, forKey: SettingsKeys.aiPhrasePresetsInitialized)
+        }
+        guard !defaults.bool(forKey: SettingsKeys.aiPhraseAssignmentsInitialized) else { return }
+        if phraseAssignments.slots.isEmpty {
+            phraseAssignments = DefaultPhrases.assignments(for: phrases)
+        }
+        defaults.set(true, forKey: SettingsKeys.aiPhraseAssignmentsInitialized)
+    }
+
+    /// Binding priority is a presentation order; keep the user's manual order intact.
+    var boundPhrases: [SavedPhrase] {
+        let byID = Dictionary(phrases.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var included = Set<UUID>()
+        return PhraseAssignments.inputs.compactMap { input in
+            guard let id = phraseAssignments[input], included.insert(id).inserted else { return nil }
+            return byID[id]
+        }
+    }
+
+    var unboundPhrases: [SavedPhrase] {
+        let boundIDs = Set(PhraseAssignments.inputs.compactMap { phraseAssignments[$0] })
+        return phrases.filter { !boundIDs.contains($0.id) }
+    }
+
+    var orderedPhrases: [SavedPhrase] { boundPhrases + unboundPhrases }
+
+    func moveUnboundPhrases(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        let boundIDs = Set(PhraseAssignments.inputs.compactMap { phraseAssignments[$0] })
+        let indices = phrases.indices.filter { !boundIDs.contains(phrases[$0].id) }
+        guard !offsets.isEmpty, offsets.allSatisfy({ indices.indices.contains($0) }),
+              (0...indices.count).contains(destination) else { return }
+        var reordered = indices.map { phrases[$0] }
+        reordered.move(fromOffsets: offsets, toOffset: destination)
+        var updated = phrases
+        for (index, phrase) in zip(indices, reordered) { updated[index] = phrase }
+        if updated != phrases { phrases = updated }
+    }
+
     // MARK: Device, permissions and app settings
+
+    @discardableResult
+    func postNotice(_ message: String, level: ActionNotice.Level,
+                    recoveryAction: ActionNotice.RecoveryAction? = nil,
+                    source: ActionNotice.Source? = nil) -> UUID {
+        // Repeated reports update one fault, while unrelated failures stay available.
+        let replaced = actionNotices.filter {
+            if let source { return $0.source == source }
+            return $0.source == nil && $0.message == message && $0.level == level && $0.recoveryAction == recoveryAction
+        }
+        for notice in replaced { dismissNotice(notice.id) }
+        let notice = ActionNotice(level: level, message: message, recoveryAction: recoveryAction, source: source)
+        actionNotices.insert(notice, at: 0)
+        if let delay = level.dismissalDelay {
+            noticeDismissals[notice.id] = noticeSchedule(delay) { [weak self] in
+                self?.dismissNotice(notice.id)
+            }
+        }
+        return notice.id
+    }
+
+    func dismissNotice(_ id: UUID) {
+        noticeDismissals.removeValue(forKey: id)?.cancel()
+        actionNotices.removeAll { $0.id == id }
+    }
+
+    func resolveNotices(from source: ActionNotice.Source) {
+        for notice in actionNotices.filter({ $0.source == source }) { dismissNotice(notice.id) }
+    }
+
+    func showNextNotice() {
+        guard actionNotices.count > 1 else { return }
+        actionNotices.append(actionNotices.removeFirst())
+    }
+
+    func performNoticeRecovery(_ action: ActionNotice.RecoveryAction) {
+        switch action {
+        case .permissions: openPermissions()
+        case .connection:
+            page = .connection
+            noticeNavigationRequest = ActionNotice.NavigationRequest(action: action)
+        case .configuration:
+            page = .about
+            noticeNavigationRequest = ActionNotice.NavigationRequest(action: action)
+        case .macros: page = .macros
+        case .loginItems: SMAppService.openSystemSettingsLoginItems()
+        }
+    }
+
+    func finishNoticeNavigation(_ id: UUID) {
+        guard noticeNavigationRequest?.id == id else { return }
+        noticeNavigationRequest = nil
+    }
 
     func installMicrophone() { onInstallMicrophone?() }
     func uninstallMicrophone() { onUninstallMicrophone?() }
-    func rescan() { actionMessage = "正在重新连接遥控器…"; onRescan?() }
+    func rescan() { postNotice("正在重新连接遥控器…", level: .information); onRescan?() }
     func toggleMode() { onToggleMode?() }
     func refreshDevices(forceReload: Bool = false) {
         let devices = (forceReload ? AudioDeviceCatalog.shared.reload() : AudioDeviceCatalog.shared.devices())
@@ -764,6 +888,7 @@ final class RemoteDashboardModel: ObservableObject {
         microphoneInstalled = RemoteMicrophoneOutput.installed
         microphoneComponentPresent = RemoteMicrophoneInstallation.isInstalledOnDisk
         microphoneUpdateAvailable = RemoteMicrophoneInstallation.updateRequired
+        if !microphoneUpdateAvailable { resolveNotices(from: .microphoneUpdate) }
     }
     func refreshPermissions() {
         inputGranted = CGPreflightListenEventAccess()
@@ -771,17 +896,34 @@ final class RemoteDashboardModel: ObservableObject {
         microphoneGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         bluetoothGranted = CBManager.authorization == .allowedAlways
         loginEnabled = SMAppService.mainApp.status == .enabled
+        if inputGranted && accessibilityGranted { resolveNotices(from: .voicePermissions) }
         refreshDevices()
     }
     func setLoginEnabled(_ enabled: Bool) {
         do {
             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-            if SMAppService.mainApp.status == .requiresApproval { actionMessage = "请在系统设置 → 通用 → 登录项中允许 RcHarness。" }
+            if SMAppService.mainApp.status == .requiresApproval { postNotice("请在系统设置 → 通用 → 登录项中允许 RcHarness。", level: .warning, recoveryAction: .loginItems) }
         } catch {
-            actionMessage = "无法更改登录项：" + error.localizedDescription
+            postNotice("无法更改登录项：" + error.localizedDescription, level: .error, recoveryAction: .loginItems)
         }
         loginEnabled = SMAppService.mainApp.status == .enabled
     }
+    func showVoicePermissionNotice() {
+        postNotice(VoiceSetupGuidance.permissions, level: .warning,
+                   recoveryAction: .permissions, source: .voicePermissions)
+    }
+
+    func openPermissions() {
+        page = .about
+        // Repeated requests must also scroll when Settings is already open.
+        permissionsNavigationRequest = UUID()
+    }
+
+    func finishPermissionsNavigation(_ request: UUID) {
+        guard permissionsNavigationRequest == request else { return }
+        permissionsNavigationRequest = nil
+    }
+
     func playTestTone() {
         guard !audioBusy, testOutput == nil else { return }
         let output = RemoteMicrophoneOutput(outputUID: { [weak self] in self?.outputUID ?? RemoteMicrophoneOutput.deviceUID })
@@ -790,16 +932,17 @@ final class RemoteDashboardModel: ObservableObject {
             guard let self, let output, self.testOutput === output else { return }
             self.audioOutputState = state
             switch state {
-            case .failed(let message):
-                self.actionMessage = message
+            case .failed:
+                self.resolveNotices(from: .testTone)
                 self.testOutput = nil
             case .idle:
-                self.actionMessage = "测试音播放完成"
+                self.resolveNotices(from: .testTone)
+                self.postNotice("测试音发送完成，请在目标语音应用中检查麦克风输入电平。", level: .success)
                 self.testOutput = nil
             default: break
             }
         }
-        actionMessage = "正在向所选设备发送 1 秒测试音"
+        postNotice("正在向接收设备发送 1 秒测试音，请在目标语音应用中观察麦克风输入电平。", level: .information, source: .testTone)
         output.begin()
         guard output.failure == nil else { return }
         // Less than the bounded live queue; four blocks deliver exactly one second.
@@ -818,10 +961,11 @@ final class RemoteDashboardModel: ObservableObject {
         output.onStateChange = nil
         output.stop()
         audioOutputState = .idle
+        resolveNotices(from: .testTone)
     }
     func copyDiagnostics() {
         copy(diagnosticsText)
-        actionMessage = "诊断信息已复制"
+        postNotice("诊断信息已复制", level: .success)
     }
     var diagnosticsText: String {
         "RcHarness \(AppInfo.version) (\(AppInfo.build))\nRemoteModel=\(remoteProfile.model)\nValidation=\(remoteProfile.validation.rawValue)\nBluetooth=\(bluetoothGranted)\nInputMonitoring=\(inputGranted)\nAccessibility=\(accessibilityGranted)\nMicrophone=\(microphoneGranted)\nRemoteConnected=\(isConnected)\nVoiceReady=\(voiceReady)\nOutputUID=\(outputUID)\nAudioOutput=\(audioOutputState)\nMicrophoneComponent=\(microphoneInstalled)\(microphoneUpdateAvailable ? " (update available)" : "")\n\(voiceDiagnostics)"

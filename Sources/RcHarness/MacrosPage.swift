@@ -16,7 +16,7 @@ struct MacrosPage: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .top, spacing: SettingsStyle.Spacing.groups) {
             macroList.frame(width: 230)
             if let index = model.macros.firstIndex(where: { $0.id == selectedMacroID }) {
                 editor(index).id(model.macros[index].id)
@@ -39,9 +39,10 @@ struct MacrosPage: View {
     }
 
     private var macroList: some View {
-        SettingsPanel(contentPadding: EdgeInsets(top: 20, leading: 20, bottom: 12, trailing: 8)) {
-            HStack(spacing: 8) {
-                Text("我的组合动作").font(.system(size: 15, weight: .semibold))
+        SettingsPanel(contentPadding: EdgeInsets(top: SettingsStyle.panelPadding, leading: SettingsStyle.panelPadding,
+                                               bottom: SettingsStyle.controlPadding, trailing: SettingsStyle.compactControlPadding)) {
+            HStack(spacing: SettingsStyle.Spacing.inline) {
+                Text("我的组合动作").font(SettingsStyle.Typography.panelTitle)
                 Spacer(minLength: 4)
                 if !model.macros.isEmpty {
                     Button { addMacro() } label: { Label("新建", systemImage: "plus") }
@@ -51,8 +52,8 @@ struct MacrosPage: View {
                         .accessibilityLabel("新建组合动作")
                 }
             }
-            .padding(.trailing, 12)
-            Divider().padding(.trailing, 12)
+            .padding(.trailing, SettingsStyle.panelPadding - SettingsStyle.compactControlPadding)
+            Divider().padding(.trailing, SettingsStyle.panelPadding - SettingsStyle.compactControlPadding)
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
@@ -73,10 +74,10 @@ struct MacrosPage: View {
                                     Spacer(minLength: 4)
                                     Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                                 }
-                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .padding(.horizontal, SettingsStyle.controlPadding).padding(.vertical, 6)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(selectedMacroID == macro.id ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 8))
-                                .contentShape(RoundedRectangle(cornerRadius: 8))
+                                .background(selectedMacroID == macro.id ? Color.accentColor.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
+                                .contentShape(RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                             }
                             .buttonStyle(.plain)
                             .accessibilityAddTraits(selectedMacroID == macro.id ? .isSelected : [])
@@ -118,17 +119,17 @@ struct MacrosPage: View {
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
                         if steps.wrappedValue.isEmpty {
                             Text("还没有步骤，点击下方“添加步骤”开始配置。")
                                 .font(.callout).foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
                         }
                         ForEach(steps) { $step in
-                            VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
                                 HStack {
                                     Text("步骤 \((macro.steps.firstIndex(where: { $0.id == step.id }) ?? 0) + 1)")
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(SettingsStyle.Typography.body.weight(.semibold))
                                     Spacer()
                                     Button { steps.wrappedValue.removeAll { $0.id == step.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("移除步骤")
                                 }
@@ -139,7 +140,7 @@ struct MacrosPage: View {
                                     Text(String(format: "%.1f 秒", step.delay)).font(.caption.monospacedDigit()).frame(width: 45)
                                 }
                             }
-                            .padding(12).background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: 10))
+                            .padding(SettingsStyle.controlPadding).background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
                             .id(step.id)
                         }
                         Button { steps.wrappedValue.append(MacroStep()) } label: {
@@ -156,7 +157,7 @@ struct MacrosPage: View {
             Divider()
             HStack {
                 Button("删除组合动作", role: .destructive) {
-                    model.deleteMacro(macro.id)
+                    model.requestDeletion(.macro(macro.id))
                 }.buttonStyle(.link)
                 Spacer()
                 Button("绑定到遥控器") { model.page = .mapping; model.editorVisible = true; actionFilter = .custom }

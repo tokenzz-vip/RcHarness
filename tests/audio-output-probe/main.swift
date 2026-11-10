@@ -5,6 +5,10 @@ import Foundation
 
 enum RemoteVoiceStreamEvent { case started, ended, cancelled }
 
+// Start the probe normally, then attach Instruments during this lead-in.
+// Launching it from Instruments can have a different recording authorization.
+if CommandLine.arguments.contains("--wait-for-profiler") { pump(10) }
+
 guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
       RemoteMicrophoneOutput.installed else {
     print("SKIP: authorized microphone and installed loopback required")
@@ -13,6 +17,10 @@ guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized,
 
 func pump(_ seconds: TimeInterval) {
     RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+}
+
+if CommandLine.arguments.contains("--latency") {
+    exit(MainActor.assumeIsolated { runAudioLatencyProbe() })
 }
 
 final class OriginalPlayback {

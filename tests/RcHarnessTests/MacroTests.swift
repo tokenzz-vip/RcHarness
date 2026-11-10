@@ -25,6 +25,7 @@ final class MacroTests: XCTestCase {
         let third = model.addMacro()
         XCTAssertEqual(model.macros.map(\.name), defaultNames + ["新组合动作", "新组合动作 3", "新组合动作 2"])
         XCTAssertNotEqual(first, third)
+        model.flushPendingWrites()
         let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(restored.macros, model.macros)
     }
@@ -45,6 +46,7 @@ final class MacroTests: XCTestCase {
         XCTAssertTrue(model.renameMacro(second, name: "编译"))
         XCTAssertFalse(model.renameMacro(first, name: " 编译 "))
         XCTAssertFalse(model.renameMacro(UUID(), name: "其他"))
+        model.flushPendingWrites()
         let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(restored.macros, model.macros)
     }
@@ -58,6 +60,7 @@ final class MacroTests: XCTestCase {
         XCTAssertEqual(model.macros.prefix(macros.count).map(\.id), macros.map(\.id))
         XCTAssertEqual(model.macros.prefix(macros.count).map(\.steps), macros.map(\.steps))
         XCTAssertEqual(SettingsStorage.load([SavedMacro].self, "macros", defaults: defaults), model.macros)
+        model.flushPendingWrites()
         let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(restored.macros, model.macros)
     }
@@ -77,6 +80,7 @@ final class MacroTests: XCTestCase {
         let exported = try JSONDecoder().decode(SettingsBackup.self, from: JSONEncoder().encode(model.configurationBackup()))
         try model.applyConfiguration(exported)
         XCTAssertEqual(model.macros, exported.macros)
+        model.flushPendingWrites()
         let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(restored.macros, exported.macros)
         XCTAssertEqual(restored.mapping[.buttonA].referenceID, macros[1].id.uuidString)
@@ -95,6 +99,7 @@ final class MacroTests: XCTestCase {
         model.deleteMacro(second)
         XCTAssertTrue(model.renameMacro(first, name: "新组合动作 2"))
         model.updateMacroSteps([], for: UUID())
+        model.flushPendingWrites()
         let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(restored.macros, model.macros)
     }
@@ -128,6 +133,7 @@ final class MacroTests: XCTestCase {
         model.updateMacroSteps([MacroStep(mapping: ButtonMapping(action: .paste), delay: 0.5)], for: child)
         let backup = try JSONDecoder().decode(SettingsBackup.self, from: JSONEncoder().encode(model.configurationBackup()))
         try model.applyConfiguration(backup)
+        model.flushPendingWrites()
         let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         let root = try XCTUnwrap(restored.macros.first(where: { $0.id == parent }))
         let plan = try MacroExecutionPlan(root, macros: restored.macros)
