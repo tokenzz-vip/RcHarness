@@ -66,6 +66,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         dashboardModel.onThemeModeChange = { NSApp.appearance = $0.appearance }
         hid = XiaomiRemoteHIDManager(profiles: [dashboardModel.remoteProfile])
         voice = XiaomiRemoteVoice(profile: dashboardModel.remoteProfile, defaults: settingsDefaults)
+        voice.setVoiceMode(dashboardModel.voiceMode)
+        hid.setVoiceMode(dashboardModel.voiceMode)
         configureInput()
         statusMenu.item(withTag: 101)?.title = "RcHarness · \(dashboardModel.remoteProfile.model)"
         mapping = dashboardModel.effectiveMapping
@@ -98,6 +100,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self?.heldVoiceInput = nil
             self?.voiceSession.cancel()
             self?.voice.cancelActiveStream()
+            if let self {
+                self.voice.setVoiceMode(self.dashboardModel.voiceMode)
+                self.hid.setVoiceMode(self.dashboardModel.voiceMode)
+            }
         }
         dashboardModel.onGainChange = { [weak self] in self?.voice.gainDB = Float($0) }
         voice.gainDB = Float(dashboardModel.gain)
@@ -165,6 +171,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         voice.onSamples = nil
         voice.onStreamEvent = nil
         voice.onVoiceButtonInput = nil
+        voice.onCaptureFailure = nil
+        voice.canStartCapture = nil
         harnessSwitcher.model.reset(reason: "remote-changed")
         phrasePicker.model.reset()
         gestures.cancel()
@@ -177,6 +185,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             guard let self, self.remoteSelectionRevision == revision else { return }
             self.hid = XiaomiRemoteHIDManager(profiles: [profile])
             self.voice = XiaomiRemoteVoice(profile: profile, defaults: self.settingsDefaults)
+            self.voice.setVoiceMode(self.dashboardModel.voiceMode)
+            self.hid.setVoiceMode(self.dashboardModel.voiceMode)
             self.voice.gainDB = Float(self.dashboardModel.gain)
             self.voice.enabled = self.mode == .mapping
             self.configureInput()
@@ -333,6 +343,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self.updateStatusItem()
         }
         hid.onButtonInput = { [weak self] input, pressed in
+            if input == .options, self?.voice.voiceMode == .tap {
+                self?.voice.receiveTapButton(pressed: pressed)
+                return
+            }
             self?.dashboardModel?.setInput(input, pressed: pressed)
             self?.handle(input: input, pressed: pressed)
         }
@@ -359,6 +373,14 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self?.dashboardModel?.setInput(.options, pressed: pressed)
             self?.handle(input: .options, pressed: pressed)
         }
+        voice.onCaptureFailure = { [weak self] message in
+            self?.dashboardModel?.postNotice(message, level: .error, recoveryAction: .connection, source: .voiceConnection)
+        }
+        voice.canStartCapture = { [weak self] in
+            guard let self else { return false }
+            return self.mode == .mapping && self.voiceSession.isIdle
+                && !self.harnessSwitcher.model.isPresented && !self.phrasePicker.model.isPresented
+        }
         voice.onStreamEvent = { [weak self] event in
             guard self?.harnessSwitcher.model.isPresented != true,
                   self?.phrasePicker.model.isPresented != true else { return }
@@ -381,7 +403,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             if !pressed { voiceStopInputs.remove(input) }
             return
         }
-        if mode == .mapping, pressed, heldVoiceInput != input, voiceSession.finishToggle() {
+        if mode == .mapping, pressed, heldVoiceInput != input,
+           voiceSession.finishToggle(waitForStreamEnd: dashboardModel.voiceMode == .tap) {
             heldVoiceInput = nil
             voiceStopInputs.insert(input)
             voice.releaseRemappedPress()
@@ -429,7 +452,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             heldVoiceInput = input
             dashboardModel.stopTestTone()
             voice.prepareForPress(requestMicrophone: false)
-            voiceSession.press(mapping: mapping[.options], fnTap: false, toggle: dashboardModel.voiceMode == .tap)
+            voiceSession.press(mapping: mapping[.options], fnTap: false, toggle: dashboardModel.voiceMode == .tap,
+                               endToggleWithStream: dashboardModel.voiceMode == .tap)
         }
     }
 
@@ -797,6 +821,27 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                         view.cacheDisplay(in: view.bounds, to: bitmap)
                         if let data = bitmap.representation(using: .png, properties: [:]) {
                             try? data.write(to: directory.appendingPathComponent(filename + ".png"))
+                        }
+                    }
+                }
+                if voiceEditorPreview {
+                    // Export the same content used by the popover, including a
+                    // constrained height to inspect the fixed action row.
+                    for (name, mode, height, shortcut) in [
+                        ("voice-keys-hold", VoiceTriggerMode.hold, VoiceShortcutPopoverLayout.height, dashboardModel.voiceHoldShortcut),
+                        ("voice-keys-tap", .tap, VoiceShortcutPopoverLayout.height, VoiceShortcutChoice.pairs[6].shortcut),
+                        ("voice-keys-compact", .tap, CGFloat(220), VoiceShortcutChoice.pairs[6].shortcut)
+                    ] {
+                        let panel = NSHostingView(rootView: VoiceShortcutSelectionPanel(mode: mode, shortcut: shortcut,
+                            height: height, onCancel: {}, onConfirm: { _ in })
+                            .background(Color(nsColor: .windowBackgroundColor)))
+                        panel.frame = NSRect(x: 0, y: 0, width: VoiceShortcutPopoverLayout.width, height: height)
+                        panel.layoutSubtreeIfNeeded()
+                        if let bitmap = panel.bitmapImageRepForCachingDisplay(in: panel.bounds) {
+                            panel.cacheDisplay(in: panel.bounds, to: bitmap)
+                            if let data = bitmap.representation(using: .png, properties: [:]) {
+                                try? data.write(to: directory.appendingPathComponent(name + ".png"))
+                            }
                         }
                     }
                 }

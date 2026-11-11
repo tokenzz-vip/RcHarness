@@ -22,8 +22,8 @@ final class VoiceShortcutSettingsTests: XCTestCase {
         XCTAssertEqual(model.voiceHoldShortcut, .voiceHoldDefault)
         XCTAssertEqual(model.voiceTapShortcut, .voiceTapDefault)
         XCTAssertEqual(model.voiceMode, .hold)
-        let hold = RecordedShortcut(keyCode: 0x28, modifiers: CGEventFlags.maskCommand.rawValue, label: "⌘K")
-        let tap = RecordedShortcut(keyCode: 0x31, modifiers: CGEventFlags.maskAlternate.rawValue, label: "⌥Space")
+        let hold = VoiceShortcutChoice.singles[2].shortcut
+        let tap = VoiceShortcutChoice.pairs[6].shortcut
         model.voiceHoldShortcut = hold
         model.voiceTapShortcut = tap
         model.voiceMode = .tap
@@ -55,6 +55,37 @@ final class VoiceShortcutSettingsTests: XCTestCase {
         XCTAssertEqual(normalized.voiceMode, .hold)
     }
 
+    func testGoogleTapImportAndSwitchBackToHoldKeepBothShortcutsAndXiaomiDisabled() throws {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        model.selectRemoteProfile(RemoteProfiles.googleG9N9N.id)
+        XCTAssertEqual(model.voiceMode, .hold, "Existing Google configurations default to hold")
+        let hold = VoiceShortcutChoice.singles[2].shortcut
+        let tap = VoiceShortcutChoice.pairs[6].shortcut
+        model.voiceHoldShortcut = hold
+        model.voiceTapShortcut = tap
+        model.voiceMode = .tap
+        let backup = try JSONDecoder().decode(SettingsBackup.self, from: JSONEncoder().encode(model.configurationBackup()))
+        model.voiceMode = .hold
+        try model.applyConfiguration(backup)
+        let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        XCTAssertEqual(restored.voiceMode, .tap)
+        XCTAssertEqual(restored.effectiveMapping[.options].shortcut, tap)
+        restored.voiceMode = .hold
+        XCTAssertEqual(restored.effectiveMapping[.options].shortcut, hold)
+        XCTAssertEqual(restored.voiceTapShortcut, tap)
+        for profile in [RemoteProfiles.xiaomiRC001, RemoteProfiles.xiaomiRC003] {
+            restored.selectRemoteProfile(profile.id)
+            restored.voiceMode = .tap
+            XCTAssertEqual(restored.voiceMode, .hold)
+            XCTAssertFalse(restored.remoteProfile.supportsVoiceTap)
+            XCTAssertEqual(restored.configurationBackup().globalButtons?.voiceMode, .hold)
+        }
+        restored.selectRemoteProfile(RemoteProfiles.googleG9N9N.id)
+        XCTAssertEqual(restored.voiceMode, .hold)
+        XCTAssertEqual(restored.voiceHoldShortcut, hold)
+        XCTAssertEqual(restored.voiceTapShortcut, tap)
+    }
+
     func testHeldRecordedShortcutSendsIndependentEdgesAndFnSpaceSharesHIDSource() {
         var events: [CGEvent] = []
         let sender = SystemEventSender(postEvent: { events.append($0) })
@@ -63,12 +94,27 @@ final class VoiceShortcutSettingsTests: XCTestCase {
         XCTAssertEqual(events[0].type, .flagsChanged)
         sender.sendShortcut(.voiceHoldDefault, pressed: false)
         XCTAssertEqual(events.last?.flags, [])
-        sender.sendShortcut(.voiceTapDefault, pressed: true)
-        sender.sendShortcut(.voiceTapDefault, pressed: false)
+        let fnSpace = RecordedShortcut(keyCode: 49, modifiers: CGEventFlags.maskSecondaryFn.rawValue, label: "Fn + Space")
+        sender.sendShortcut(fnSpace, pressed: true)
+        sender.sendShortcut(fnSpace, pressed: false)
         XCTAssertEqual(events.map { $0.getIntegerValueField(.keyboardEventKeycode) }, [63, 63, 49, 49])
         XCTAssertEqual(events.map { $0.getIntegerValueField(.eventSourceStateID) }, [1, 1, 1, 1])
         XCTAssertEqual(events[2].flags, .maskSecondaryFn)
         XCTAssertEqual(events[3].flags, [])
+    }
+
+    func testInvalidOldVoiceBindingsMigrateAndSaveFallback() throws {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        var backup = model.configurationBackup()
+        let fnSpace = RecordedShortcut(keyCode: 49, modifiers: CGEventFlags.maskSecondaryFn.rawValue, label: "Fn + Space")
+        backup.globalButtons?.voice = ButtonMapping(action: .recordedShortcut, shortcut: fnSpace)
+        backup.globalButtons?.voiceTapShortcut = fnSpace
+        try model.applyConfiguration(backup)
+        XCTAssertEqual(model.voiceHoldShortcut, .voiceHoldDefault)
+        XCTAssertEqual(model.voiceTapShortcut, .voiceHoldDefault)
+        let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        XCTAssertEqual(restored.voiceHoldShortcut, .voiceHoldDefault)
+        XCTAssertEqual(restored.voiceTapShortcut, .voiceHoldDefault)
     }
 
 }

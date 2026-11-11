@@ -127,6 +127,7 @@ final class RemoteVolumeGuardWorker {
     private let profiles: [RemoteProfile]
     private let pause: (TimeInterval) -> Void
     private let modelNumber: (UInt64) -> String?
+    private let recoverRetiredShortcuts: Bool
 
     init(
         directory: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/RcHarness"),
@@ -134,6 +135,7 @@ final class RemoteVolumeGuardWorker {
         retryMilliseconds: Int32 = 500,
         maximumRetryMilliseconds: Int32 = 30_000,
         profiles: [RemoteProfile] = RemoteProfiles.all,
+        recoverRetiredShortcuts: Bool = false,
         retryTiming: RetryTiming = .system,
         identity: DeviceIdentity = .system,
         hidutil: @escaping ([String]) throws -> Data = RemoteVolumeGuardWorker.executeHidutil
@@ -146,6 +148,7 @@ final class RemoteVolumeGuardWorker {
         self.hidutil = hidutil
         self.pause = retryTiming.pause
         self.modelNumber = identity.modelNumber
+        self.recoverRetiredShortcuts = recoverRetiredShortcuts
     }
 
     @discardableResult
@@ -155,7 +158,7 @@ final class RemoteVolumeGuardWorker {
         // enough time to complete several hidutil calls.
         var lock: SingleInstanceLock?
         for _ in 0..<500 {
-            lock = try? SingleInstanceLock(path: directory.appendingPathComponent("remote-volume.lock").path)
+            lock = try? SingleInstanceLock(path: directory.appendingPathComponent(recoverRetiredShortcuts ? "shortcut-function.lock" : "remote-volume.lock").path)
             if lock != nil { break }
             pause(0.02)
         }
@@ -164,7 +167,7 @@ final class RemoteVolumeGuardWorker {
             return false
         }
         return withExtendedLifetime(lock) {
-            let journal = directory.appendingPathComponent("remote-volume-restore.json")
+            let journal = directory.appendingPathComponent(recoverRetiredShortcuts ? "shortcut-function-restore.json" : "remote-volume-restore.json")
             do {
                 var snapshots: [RemoteVolumeSnapshot] = []
                 if FileManager.default.fileExists(atPath: journal.path) {
@@ -172,6 +175,8 @@ final class RemoteVolumeGuardWorker {
                 }
                 // Recover even if both the previous GUI and guard were interrupted.
                 guard restoreWithRetry(&snapshots, journal: journal) else { return false }
+                // The retired recorder may only restore its journal; never acquire keys.
+                if recoverRetiredShortcuts { return true }
                 var mapping = false
                 var needsRetry = false
                 var retryDelay = retryMilliseconds
@@ -253,7 +258,10 @@ final class RemoteVolumeGuardWorker {
     private func services(profiles: [RemoteProfile]? = nil, includeNonSuppressible: Bool = false) throws -> [[String: Any]] {
         var seenRegistryIDs: Set<UInt64> = []
         var seenMatches: Set<String> = []
-        return try (profiles ?? self.profiles).flatMap(\.hidMatching).flatMap { match -> [[String: Any]] in
+        let matches: [[String: Any]] = recoverRetiredShortcuts
+            ? [["PrimaryUsagePage": 1, "PrimaryUsage": 6]]
+            : (profiles ?? self.profiles).flatMap(\.hidMatching)
+        return try matches.flatMap { match -> [[String: Any]] in
             let query = try Self.json(match)
             guard seenMatches.insert(query).inserted else { return [] }
             let output = try hidutil(["list", "--ndjson", "--matching", query])

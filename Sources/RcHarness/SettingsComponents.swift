@@ -213,7 +213,6 @@ struct LivePressIndicator: View {
 struct ShortcutBindingEditor: View {
     @Binding var shortcut: RecordedShortcut?
     @Binding var capturing: Bool
-    @State private var failure: String?
 
     init(shortcut: Binding<RecordedShortcut?>, capturing: Binding<Bool>) {
         _shortcut = shortcut
@@ -231,7 +230,6 @@ struct ShortcutBindingEditor: View {
                 Text(shortcut?.label ?? "尚未设置快捷键").font(.system(size: 13, design: .monospaced))
                 Spacer()
                 Button(capturing ? "取消录制" : "录制快捷键") {
-                    failure = nil
                     capturing.toggle()
                 }
             }
@@ -241,13 +239,7 @@ struct ShortcutBindingEditor: View {
                 ShortcutCapture(onCapture: {
                     shortcut = $0
                     capturing = false
-                }, onFailure: {
-                    failure = $0
-                    capturing = false
                 }, onCancel: { capturing = false }).frame(height: 1)
-            }
-            if let failure {
-                Text(failure).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -256,7 +248,6 @@ struct ShortcutBindingEditor: View {
 @MainActor
 struct ShortcutCapture: NSViewRepresentable {
     var onCapture: (RecordedShortcut) -> Void
-    var onFailure: (String) -> Void
     var onCancel: () -> Void
 
     func makeNSView(context: Context) -> CaptureField {
@@ -268,13 +259,10 @@ struct ShortcutCapture: NSViewRepresentable {
     func updateNSView(_ view: CaptureField, context: Context) { updateCallbacks(view) }
 
     private func updateCallbacks(_ view: CaptureField) {
-        // Deliver outside the event tap / view update stack. A removed recording
+        // Deliver outside the AppKit event / view update stack. A removed recording
         // field must not overwrite a newer recording's state with a late result.
         view.session.onCapture = { [weak view] shortcut in
             view?.deliverIfAttached { onCapture(shortcut) }
-        }
-        view.session.onFailure = { [weak view] message in
-            view?.deliverIfAttached { onFailure(message) }
         }
         view.onCancel = { [weak view] in
             view?.deliverIfAttached { onCancel() }
@@ -322,6 +310,21 @@ struct ShortcutCapture: NSViewRepresentable {
                 }
                 self.session.start()
             }
+        }
+
+        override func keyDown(with event: NSEvent) { receive(event) }
+        override func keyUp(with event: NSEvent) { receive(event) }
+        override func flagsChanged(with event: NSEvent) { receive(event) }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            guard window?.firstResponder === self, session.isRecording, event.type == .keyDown else { return false }
+            return receive(event)
+        }
+
+        @discardableResult
+        private func receive(_ event: NSEvent) -> Bool {
+            guard window?.firstResponder === self, let cgEvent = event.cgEvent else { return false }
+            return session.handle(cgEvent.type, event: cgEvent)
         }
 
         override func resignFirstResponder() -> Bool {

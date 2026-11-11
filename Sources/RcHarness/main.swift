@@ -3,6 +3,9 @@ import Darwin
 
 // The guard only manages HID mappings and stdin. Run it before creating
 // NSApplication so it never registers as a second Dock application.
+if CommandLine.arguments.contains("--restore-shortcut-keys") {
+    exit(RemoteVolumeGuardWorker(recoverRetiredShortcuts: true).run() ? 0 : 1)
+}
 if CommandLine.arguments.contains("--remote-volume-guard") {
     let profiles: [RemoteProfile]
     if let flag = CommandLine.arguments.firstIndex(of: "--remote-profiles") {
@@ -40,6 +43,7 @@ if isUtilityProcess {
 }
 // Top-level code runs on the main thread before the run loop starts.
 MainActor.assumeIsolated {
+    if !isUtilityProcess { RetiredShortcutProtection.recoverIfNeeded() }
     let delegate = RcHarnessApp()
     application.delegate = delegate
     application.setActivationPolicy(.regular)

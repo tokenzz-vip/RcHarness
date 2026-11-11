@@ -28,6 +28,7 @@ final class RemoteVoiceSessionController {
         var mapping: ButtonMapping?
         var tap = false
         var toggle = false
+        var endToggleWithStream = false
         var physicalDown = false
         var released = false
         var streamStarted = false
@@ -63,6 +64,7 @@ final class RemoteVoiceSessionController {
     private var physicalSession: Session?
     private var bluetoothSession: Session?
     private var current: Session? { sessions.first }
+    var isIdle: Bool { sessions.isEmpty }
 
     init(output: RemoteVoiceAudioOutput, schedule: @escaping Scheduler = mainQueue,
          logger: @escaping (String) -> Void = AudioDiagnostics.log,
@@ -73,11 +75,12 @@ final class RemoteVoiceSessionController {
         self.sendKey = sendKey
     }
 
-    func press(mapping: ButtonMapping, fnTap: Bool, toggle: Bool = false) {
+    func press(mapping: ButtonMapping, fnTap: Bool, toggle: Bool = false, endToggleWithStream: Bool = false) {
         if let physicalSession, physicalSession.physicalDown, !physicalSession.closed { return }
         guard let session = sessions.first(where: { $0.mapping == nil && !$0.closed }) ?? makeSession() else { return }
         session.mapping = mapping
         session.toggle = toggle
+        session.endToggleWithStream = endToggleWithStream
         session.tap = toggle || (fnTap && mapping.action == .fn)
         session.physicalDown = true
         physicalSession = session
@@ -96,15 +99,16 @@ final class RemoteVoiceSessionController {
     }
 
     /// A stop press is consumed by the input router, including its release.
-    /// BLE STOP and the original voice-key release never end latch-to-talk.
+    /// The original key release never ends latch-to-talk. Host-controlled
+    /// capture can wait for its STOP and drain instead of cutting off the tail.
     @discardableResult
-    func finishToggle() -> Bool {
+    func finishToggle(waitForStreamEnd: Bool = false) -> Bool {
         guard let session = current, session.toggle, !session.released, !session.closed,
               !session.cancelled else { return false }
         session.released = true
         session.finishRequested = true
         if session.outputActive {
-            session.streamEnded = true
+            if !waitForStreamEnd { session.streamEnded = true }
             pump(session)
         } else {
             closeTarget(session)
@@ -131,9 +135,13 @@ final class RemoteVoiceSessionController {
             }
             activateIfPossible()
         case .ended:
-            guard let session = bluetoothSession else { return }
+            guard let session = bluetoothSession ?? current.flatMap({ $0.endToggleWithStream ? $0 : nil }) else { return }
             bluetoothSession = nil
             session.streamEnded = true
+            if session.toggle, session.endToggleWithStream {
+                session.released = true
+                session.finishRequested = true
+            }
             log(session, "ble_stop")
             pump(session)
         case .cancelled:
@@ -198,7 +206,8 @@ final class RemoteVoiceSessionController {
                 session.tasks.append(self.schedule(self.targetStartDelay) { [weak self, weak session] in
                     guard let self, let session, self.current === session, !session.closed else { return }
                     session.gateOpen = true
-                    if session.toggle, session.finishRequested { self.pump(session) }
+                    if session.cancelled { self.closeTarget(session) }
+                    else if session.toggle, session.finishRequested { self.pump(session) }
                     else if session.finishRequested { self.closeTarget(session) }
                     else { self.pump(session) }
                 })

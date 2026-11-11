@@ -218,6 +218,20 @@ final class SystemEventSender {
     /// Voice holds need independent key edges; ordinary recorded macros still
     /// tap by calling both edges together above.
     func sendShortcut(_ shortcut: RecordedShortcut, pressed: Bool) {
+        if let codes = shortcut.modifierKeyCodes {
+            guard let choice = VoiceShortcutChoice.matching(shortcut, mode: .tap) else { return }
+            let usesFunction = codes.contains(VirtualKey.function)
+            if usesFunction && functionKeySource == nil { return }
+            var flags = CGEventFlags()
+            let keys = choice.keys.map { key -> (VoiceShortcutKey, CGEventFlags) in
+                flags.formUnion(key.flags)
+                return (key, flags)
+            }
+            for (key, flags) in pressed ? keys : Array(keys.reversed()) {
+                heldKey(key.keyCode, flags: flags, pressed: pressed, source: usesFunction ? functionKeySource : nil)
+            }
+            return
+        }
         let isFunction = shortcut.keyCode == VirtualKey.function
         let usesFunction = isFunction || CGEventFlags(rawValue: shortcut.modifiers).contains(.maskSecondaryFn)
         if usesFunction {

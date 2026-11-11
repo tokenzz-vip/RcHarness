@@ -53,6 +53,8 @@ struct RemoteVoiceSessionGate {
 struct RemoteVoiceCapabilities: Equatable {
     let version: UInt16
     let frameBytes: Int
+    /// Absent in the older Xiaomi reply layout.
+    let interactionModel: UInt8?
 
     init?(_ packet: Data) {
         let bytes = Array(packet)
@@ -62,6 +64,7 @@ struct RemoteVoiceCapabilities: Equatable {
         // Xiaomi RC001/RC003 v1 firmware uses the older two-byte codec field
         // in its reply.
         let codecs = bytes[3] == 0 && bytes.count >= 9 ? bytes[4] : bytes[3]
+        interactionModel = bytes[3] == 0 ? nil : bytes[4]
         guard codecs & 2 != 0 else { return nil }
         let size = Int(bytes[5]) * 256 + Int(bytes[6])
         // ATVV v1 audio is headerless. Firmware chooses the frame length;
@@ -73,10 +76,17 @@ struct RemoteVoiceCapabilities: Equatable {
 
 extension RemoteProfile {
     var voiceCapabilitiesRequest: [UInt8] {
-        // Chromecast requests 16 kHz / hold-only; Xiaomi uses its original
-        // capability masks. Both profiles disable tap mode.
+        // Preserve the parameters verified with the original hold path.
         adapter == .chromecast ? [0x0A, 0x01, 0x00, 0x00, 0x02, 0x02]
             : [0x0A, 0x01, 0x00, 0x00, 0x03, 0x03]
+    }
+
+    func voiceCapabilitiesRequest(mode: VoiceTriggerMode) -> [UInt8] {
+        guard supportsVoiceTap, mode == .tap else { return voiceCapabilitiesRequest }
+        // Retain native HTT notifications to track press/release. A short
+        // release then opens an on-request stream; keep the supported codec
+        // limited to the existing 16 kHz decoder.
+        return [0x0A, 0x01, 0x00, 0x00, 0x02, 0x03]
     }
 }
 

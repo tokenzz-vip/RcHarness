@@ -154,7 +154,7 @@ enum RemoteProfiles {
         shortName: "Chromecast 遥控器", model: "G9N9N",
         keyProfilePrefix: "G9N-",
         vendorID: 0x18D1, productID: 0x9450,
-        voiceModelNumbers: ["G9N9N"], supportsVoiceTap: false,
+        voiceModelNumbers: ["G9N9N"], supportsVoiceTap: true,
         bluetoothNames: ["chromecast remote", "chromecast voice remote", "g9n9n"],
         bluetoothNameFragments: [],
         inputs: [.buttonA, .buttonB, .options, .home, .power,
@@ -285,14 +285,16 @@ enum PhraseLanguage: String, Codable {
 }
 
 /// A keyboard shortcut recorded in the mapping editor. Named to avoid
-/// confusion with SwiftUI.KeyboardShortcut; the JSON shape is unchanged.
+/// confusion with SwiftUI.KeyboardShortcut; legacy JSON remains readable.
 struct RecordedShortcut: Codable, Equatable, Hashable {
     let keyCode: UInt16
     let modifiers: UInt64
     let label: String
+    /// Present for selected voice chords; nil preserves legacy shortcut JSON.
+    var modifierKeyCodes: [UInt16]? = nil
 
     static let voiceHoldDefault = RecordedShortcut(keyCode: VirtualKey.function, modifiers: CGEventFlags.maskSecondaryFn.rawValue, label: "Fn / 地球键")
-    static let voiceTapDefault = RecordedShortcut(keyCode: 0x31, modifiers: CGEventFlags.maskSecondaryFn.rawValue, label: "Fn + Space")
+    static let voiceTapDefault = voiceHoldDefault
 }
 
 struct ButtonMapping: Codable, Equatable {

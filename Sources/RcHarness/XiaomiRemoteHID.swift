@@ -52,6 +52,7 @@ enum RemoteHIDUsages {
 
 final class XiaomiRemoteHIDParser {
     private let profile: RemoteProfile
+    var voiceMode: VoiceTriggerMode = .hold
     private let bindings: [UInt64: ControllerInput]
     private var active: [UInt64: Set<ControllerInput>] = [:]
 
@@ -73,7 +74,11 @@ final class XiaomiRemoteHIDParser {
             return ordered(previous.subtracting(next)).map { .init(input: $0, isPressed: false) }
                 + ordered(next.subtracting(previous)).map { .init(input: $0, isPressed: true) }
         }
-        guard let input = bindings[source] else { return [] }
+        // On-request firmware may expose Voice Command independently of the
+        // audio stream. Keep the verified hold parser unchanged.
+        let tapVoice: ControllerInput? = profile.supportsVoiceTap && voiceMode == .tap
+            && usagePage == 0x0C && usage == 0xCF ? .options : nil
+        guard let input = bindings[source] ?? tapVoice ?? active[source]?.first else { return [] }
         if value != 0 {
             active[source] = [input]
             return [.init(input: input, isPressed: true)]
@@ -131,6 +136,12 @@ final class XiaomiRemoteHIDManager {
     private var modelNumber: String?
     private let volumeGuard: any RemoteVolumeGuarding
     private var operationMode: ControllerOperationMode = .mapping
+    private var voiceMode: VoiceTriggerMode = .hold
+
+    func setVoiceMode(_ mode: VoiceTriggerMode) {
+        voiceMode = mode
+        parsers.values.forEach { $0.voiceMode = mode }
+    }
 
     init(profiles: [RemoteProfile] = RemoteProfiles.all,
          volumeGuard: (any RemoteVolumeGuarding)? = nil,
@@ -303,6 +314,7 @@ final class XiaomiRemoteHIDManager {
         }
         guard connectedDevices.insert(id).inserted else { return }
         parsers[id] = XiaomiRemoteHIDParser(profile: profile)
+        parsers[id]?.voiceMode = voiceMode
         Log.hid.info("Remote HID accepted model=\(deviceModel ?? "BLE confirmed", privacy: .public) profile=\(profile.id, privacy: .public)")
         volumeGuard.update(mapping: operationMode == .mapping)
         // The guard keeps retrying until the corresponding event service is ready.

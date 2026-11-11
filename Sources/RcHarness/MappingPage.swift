@@ -320,7 +320,6 @@ struct MappingFooter: View {
 struct MappingEditorSheet: View {
     @ObservedObject var model: RemoteDashboardModel
     @Binding var actionFilter: ActionFilter
-    @State private var capturingVoiceMode: VoiceTriggerMode?
 
     private var editedMapping: Binding<ButtonMapping> {
         Binding(get: { model.effectiveMapping[model.selectedInput, model.selectedTrigger] },
@@ -351,9 +350,12 @@ struct MappingEditorSheet: View {
                         .font(.callout).foregroundStyle(.secondary)
                     if model.selectedInput == .options {
                         voiceModeCard(.hold, title: "长按模式", detail: "按住说话，松手结束。尾音排空后释放快捷键。", shortcut: $model.voiceHoldShortcut)
-                        voiceModeCard(.tap, title: "点按模式", detail: "按一次开始说话，再按遥控器任意按键结束。", shortcut: $model.voiceTapShortcut)
+                        voiceModeCard(.tap, title: "点按模式", detail: "按一次开始说话，再按语音键结束，也可按其他遥控器按键结束。", shortcut: $model.voiceTapShortcut)
                         if !model.remoteProfile.supportsVoiceTap {
                             Text("\(model.remoteProfile.shortName) 松手后会停止收音，仅可启用长按模式。点按快捷键仍可配置。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("点按模式需与输入法的点按快捷键一致。首次使用请确认松手后仍能收音；不兼容时可切回长按模式。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     } else {
@@ -402,10 +404,9 @@ struct MappingEditorSheet: View {
                 if unavailable { Text("此遥控器不可用").font(.caption).foregroundStyle(.secondary) }
             }
             Text(detail).font(.caption).foregroundStyle(.secondary)
-            ShortcutBindingEditor(shortcut: shortcut, capturing: Binding(
-                get: { capturingVoiceMode == mode },
-                set: { capturingVoiceMode = $0 ? mode : nil }
-            ))
+            VoiceShortcutPicker(mode: mode, shortcut: shortcut)
+            Text(mode == .hold ? "选择一个按键。" : "选择一个按键，或两个不同按键的组合。")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .padding(SettingsStyle.controlPadding)
         .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))

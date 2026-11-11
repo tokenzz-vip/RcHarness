@@ -89,12 +89,14 @@ struct GlobalButtonSettings: Codable, Equatable {
         var result = self
         // Older configurations could assign the ordinary global role to the voice key.
         if result.input == .options || !profile.inputs.contains(result.input) { result.input = .power }
-        if result.voice.shortcutForVoice == nil {
-            result.voice = ButtonMapping(action: .fn)
+        let hold = VoiceShortcutChoice.normalized(result.voice.shortcutForVoice, mode: .hold)
+        if result.voice.shortcutForVoice != hold {
+            result.voice = hold == .voiceHoldDefault ? ButtonMapping(action: .fn)
+                : ButtonMapping(action: .recordedShortcut, shortcut: hold)
         }
         // The old Fn start/stop-tap switch is unrelated to latch-to-talk.
         result.voiceFnTap = false
-        if result.voiceTapShortcut == nil { result.voiceTapShortcut = .voiceTapDefault }
+        result.voiceTapShortcut = VoiceShortcutChoice.normalized(result.voiceTapShortcut, mode: .tap)
         if result.voiceMode == nil || !profile.supportsVoiceTap { result.voiceMode = .hold }
         return result
     }
