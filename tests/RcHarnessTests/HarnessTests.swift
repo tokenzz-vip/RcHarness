@@ -20,6 +20,61 @@ final class HarnessTests: XCTestCase {
         return model.selectedProfileID!
     }
 
+    func testOpenCodeUpgradeImportAndForegroundMatchingPreserveExistingConfiguration() throws {
+        var mapping = RemoteMapping.defaults
+        mapping[.buttonA] = ButtonMapping(action: .copy)
+        let profile = SavedKeyProfile(name: "已有方案", mapping: mapping)
+        var previous = HarnessConfiguration.defaults.filter { $0.id != "opencode" }
+        for index in previous.indices { previous[index].didInitializeDefaultProfile = true }
+        previous[0].profileID = profile.id
+        previous[1].isEnabled = false
+        SettingsStorage.save([profile], SettingsKeys.Stored.profiles, defaults: defaults)
+        SettingsStorage.save(previous, SettingsKeys.Stored.harnesses, defaults: defaults)
+        defaults.set(2, forKey: SettingsKeys.profileBindingsVersion)
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        let legacy = SettingsBackup(mapping: .defaults, profiles: [profile], macros: [], phrases: [], harnesses: previous)
+
+        for importing in [false, true] {
+            if importing { try model.applyConfiguration(legacy) }
+            XCTAssertEqual(Array(model.harnesses.dropLast()), previous)
+            XCTAssertEqual(model.profiles.first { $0.id == profile.id }, profile)
+            let harness = try XCTUnwrap(model.harnesses.last)
+            XCTAssertEqual(harness.id, "opencode")
+            XCTAssertEqual(harness.bundleIdentifier, "ai.opencode.desktop")
+            XCTAssertTrue(harness.isBuiltIn)
+            XCTAssertTrue(harness.didInitializeDefaultProfile)
+            let generated = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
+            XCTAssertEqual(generated.name, "OpenCode 按键方案")
+            XCTAssertEqual(generated.mapping, .defaults)
+            XCTAssertEqual(model.profiles.filter { $0.name == generated.name }.count, 1)
+            model.matchApplication("/Applications/OpenCode.app", bundleIdentifier: "AI.OPENCODE.DESKTOP")
+            XCTAssertEqual(model.selectedHarnessID, harness.id)
+            XCTAssertEqual(model.selectedProfileID, generated.id)
+            XCTAssertEqual(model.mapping, .defaults)
+            XCTAssertFalse(harness.matches(applicationPath: "/Applications/OpenCode.app", bundleIdentifier: "other.app"))
+        }
+        let generatedID = try XCTUnwrap(model.harnesses.last?.profileID)
+        XCTAssertTrue(model.bindProfile(nil, to: "opencode"))
+        XCTAssertFalse(model.canDeleteProfile(generatedID))
+        let backup = try JSONDecoder().decode(SettingsBackup.self, from: JSONEncoder().encode(model.configurationBackup()))
+        let restored = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        try restored.applyConfiguration(backup)
+        XCTAssertEqual(restored.harnesses, model.harnesses)
+        XCTAssertEqual(restored.profiles, model.profiles)
+        XCTAssertNil(restored.harnesses.last?.profileID)
+    }
+
+    func testExistingCustomOpenCodeIsPreservedWithoutAddingDuplicateBuiltIn() throws {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        let profile = SavedKeyProfile(name: "我的 OpenCode", mapping: .defaults)
+        let custom = HarnessConfiguration(id: "my-opencode", name: "我的工具", bundleIdentifier: "AI.OPENCODE.DESKTOP",
+                                          applicationPath: "/Applications/OpenCode.app", isEnabled: false, profileID: profile.id)
+        try model.applyConfiguration(SettingsBackup(mapping: .defaults, profiles: [profile], macros: [], phrases: [], harnesses: [custom]))
+        XCTAssertEqual(model.harnesses.first, custom)
+        XCTAssertFalse(model.harnesses.contains { $0.id == "opencode" })
+        XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).harnesses, model.harnesses)
+    }
+
     func testWorkBuddyMatchesCurrentAndLegacyAppsAndPreservesBindingAfterRestart() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         let harness = try XCTUnwrap(model.harnesses.first { $0.id == "workbuddy" })
@@ -123,7 +178,7 @@ final class HarnessTests: XCTestCase {
         var harness = try XCTUnwrap(HarnessConfiguration.defaults.first { $0.id == "workbuddy" })
         harness.profileID = existing.id
         try model.applyConfiguration(SettingsBackup(mapping: .defaults, profiles: [existing], macros: [], phrases: [], harnesses: [harness]))
-        XCTAssertEqual(model.profiles.count, 6)
+        XCTAssertEqual(model.profiles.count, HarnessConfiguration.defaults.count + 1)
         XCTAssertEqual(model.profiles.first { $0.id == existing.id }, existing)
         XCTAssertEqual(model.harnesses.first?.profileID, existing.id)
         XCTAssertEqual(model.harnesses.first?.didInitializeDefaultProfile, true)
@@ -172,7 +227,7 @@ final class HarnessTests: XCTestCase {
 
     func testUnboundBuiltInNamesAreProtectedAfterImportAndRestart() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
-        let names = ["Codex", "Claude", "Cursor", "DeepSeek", "WorkBuddy"]
+        let names = HarnessConfiguration.defaults.map(\.name)
         let profiles = names.flatMap { name in
             [name, name + " 按键方案", " \(name.lowercased()) \n", " \(name.lowercased()) 按键方案 \n"]
                 .map { SavedKeyProfile(name: $0, mapping: .defaults) }
@@ -204,7 +259,7 @@ final class HarnessTests: XCTestCase {
             try model.applyConfiguration(SettingsBackup(mapping: .defaults, profiles: [profile], macros: [], phrases: [], harnesses: [existing]))
             XCTAssertEqual(model.harnesses.filter { $0.id == existing.id }, [existing])
             XCTAssertFalse(model.harnesses.contains { $0.id == "workbuddy" })
-            XCTAssertEqual(model.harnesses.count, 5)
+            XCTAssertEqual(model.harnesses.count, HarnessConfiguration.defaults.count)
             XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).harnesses, model.harnesses)
         }
     }
@@ -222,7 +277,7 @@ final class HarnessTests: XCTestCase {
         defaults.set(2, forKey: SettingsKeys.profileBindingsVersion)
 
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
-        XCTAssertEqual(model.harnesses.map(\.id), ["deepseek", "codex", "claude", "cursor", "workbuddy"])
+        XCTAssertEqual(model.harnesses.map(\.id), ["deepseek", "codex", "claude", "cursor", "workbuddy", "opencode"])
         XCTAssertEqual(model.harnesses.first?.name, "DeepSeek")
         XCTAssertTrue(model.harnesses.first!.isBuiltIn)
         XCTAssertNil(model.harnesses.first?.applicationPath)
@@ -318,11 +373,11 @@ final class HarnessTests: XCTestCase {
         model.activateHarness("codex")
         XCTAssertTrue(model.bindProfile(second, to: "codex"))
         XCTAssertEqual(model.selectedProfileID, second)
-        XCTAssertEqual(model.boundHarnesses(for: first).map(\.id), ["claude", "cursor", "deepseek", "workbuddy"])
+        XCTAssertEqual(model.boundHarnesses(for: first).map(\.id), ["claude", "cursor", "deepseek", "workbuddy", "opencode"])
         XCTAssertEqual(model.boundHarnesses(for: second).map(\.id), ["codex"])
         XCTAssertTrue(model.bindProfile(nil, to: "cursor"))
         XCTAssertEqual(model.selectedHarnessID, "codex")
-        XCTAssertEqual(model.boundHarnesses(for: first).map(\.id), ["claude", "deepseek", "workbuddy"])
+        XCTAssertEqual(model.boundHarnesses(for: first).map(\.id), ["claude", "deepseek", "workbuddy", "opencode"])
         XCTAssertTrue(model.bindProfile(nil, to: "codex"))
         XCTAssertNil(model.selectedHarnessID)
         XCTAssertEqual(model.selectedProfileID, SavedKeyProfile.defaultID)
@@ -586,8 +641,9 @@ final class HarnessTests: XCTestCase {
         XCTAssertEqual(model.profiles.first(where: { $0.id == duplicate })?.name, "已重命名方案的复制")
         XCTAssertTrue(model.boundHarnesses(for: duplicate!).isEmpty)
         XCTAssertEqual(model.mapping[.buttonA].action, .paste)
+        let profilesBeforeInvalidName = model.profiles
         model.saveProfile(name: "   ")
-        XCTAssertEqual(model.profiles.count, 8)
+        XCTAssertEqual(model.profiles, profilesBeforeInvalidName)
     }
 
     func testApplicationIdentityPrefersBundleIdentifierOverPath() {

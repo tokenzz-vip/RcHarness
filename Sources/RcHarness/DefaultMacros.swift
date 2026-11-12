@@ -4,7 +4,7 @@ import Foundation
 
 enum DefaultMacros {
     // Each release adds only its new presets, preserving deletions from older sets.
-    static let version = 5
+    static let version = 6
 
     /// Mapping cards show the action before the app prefix; saved names stay intact.
     static func cardTitle(for macro: SavedMacro) -> String {
@@ -14,7 +14,7 @@ enum DefaultMacros {
     }
 
     private static let presetNames = Dictionary(uniqueKeysWithValues:
-        (codex + claude + cursor + deepSeek + workBuddy).map { ($0.id, $0.name) })
+        (codex + claude + cursor + deepSeek + workBuddy + openCode).map { ($0.id, $0.name) })
 
     // macOS defaults: https://learn.chatgpt.com/docs/reference/commands
     // IDs stay fixed so importing an older backup can recognize renamed presets.
@@ -208,6 +208,72 @@ enum DefaultMacros {
         workBuddyShortcut(24, "语音录制开关", kVK_ANSI_D, .maskCommand, "⌘D"),
     ]
 
+    // OpenCode 2.2.7 macOS Desktop defaults, verified in app.asar source maps.
+    // https://github.com/anomalyco/opencode/tree/dev/packages/app/src/shell
+    // https://github.com/anomalyco/opencode/tree/dev/packages/app/src/session/commands
+    // Focus-dependent commands and alternative bindings remain separate actions.
+    static let openCode: [SavedMacro] = [
+        openCodeShortcut(1, "新建会话（Command+N）", kVK_ANSI_N, .maskCommand, "⌘N"),
+        openCodeShortcut(2, "新建会话（Command+T）", kVK_ANSI_T, .maskCommand, "⌘T"),
+        openCodeShortcut(3, "新建窗口", kVK_ANSI_N, [.maskCommand, .maskShift], "⇧⌘N"),
+        openCodeShortcut(4, "关闭当前标签页", kVK_ANSI_W, .maskCommand, "⌘W"),
+        openCodeShortcut(5, "关闭会话标签页", kVK_ANSI_W, [.maskCommand, .maskAlternate], "⌥⌘W"),
+        openCodeShortcut(6, "重新打开已关闭标签页", kVK_ANSI_T, [.maskCommand, .maskShift], "⇧⌘T"),
+        openCodeShortcut(7, "上一个会话", kVK_UpArrow, .maskAlternate, "⌥↑"),
+        openCodeShortcut(8, "下一个会话", kVK_DownArrow, .maskAlternate, "⌥↓"),
+        openCodeShortcut(9, "上一个未读会话", kVK_UpArrow, [.maskAlternate, .maskShift], "⌥⇧↑"),
+        openCodeShortcut(10, "下一个未读会话", kVK_DownArrow, [.maskAlternate, .maskShift], "⌥⇧↓"),
+        openCodeShortcut(11, "上一个标签页（Option+Command+左）", kVK_LeftArrow, [.maskCommand, .maskAlternate], "⌥⌘←"),
+        openCodeShortcut(12, "下一个标签页（Option+Command+右）", kVK_RightArrow, [.maskCommand, .maskAlternate], "⌥⌘→"),
+        openCodeShortcut(13, "上一个标签页（Control+Shift+Tab）", kVK_Tab, [.maskControl, .maskShift], "⌃⇧Tab"),
+        openCodeShortcut(14, "下一个标签页（Control+Tab）", kVK_Tab, .maskControl, "⌃Tab"),
+        openCodeShortcut(15, "切换侧边栏", kVK_ANSI_B, [.maskCommand, .maskShift], "⇧⌘B"),
+        openCodeShortcut(16, "切换主页", kVK_ANSI_B, .maskCommand, "⌘B"),
+        openCodeShortcut(17, "搜索会话", kVK_ANSI_F, [.maskCommand, .maskShift], "⇧⌘F"),
+        openCodeShortcut(18, "当前页面查找", kVK_ANSI_F, .maskCommand, "⌘F"),
+        openCodeShortcut(19, "后退", kVK_ANSI_LeftBracket, .maskCommand, "⌘["),
+        openCodeShortcut(20, "前进", kVK_ANSI_RightBracket, .maskCommand, "⌘]"),
+        openCodeShortcut(21, "选择项目", kVK_ANSI_O, [.maskCommand, .maskShift], "⇧⌘O"),
+        openCodeShortcut(22, "循环切换工作区", kVK_ANSI_L, [.maskCommand, .maskAlternate], "⌥⌘L"),
+        openCodeShortcut(23, "打开文件", kVK_ANSI_P, .maskCommand, "⌘P"),
+        openCodeShortcut(24, "添加选中代码到上下文", kVK_ANSI_L, [.maskCommand, .maskShift], "⇧⌘L"),
+        openCodeShortcut(25, "切换审查面板", kVK_ANSI_R, [.maskCommand, .maskShift], "⇧⌘R"),
+        openCodeShortcut(26, "切换底部面板", kVK_ANSI_J, .maskCommand, "⌘J"),
+        openCodeShortcut(27, "切换终端", kVK_ANSI_Grave, .maskControl, "⌃`"),
+        openCodeShortcut(28, "打开命令菜单（Command+K）", kVK_ANSI_K, .maskCommand, "⌘K"),
+        openCodeShortcut(29, "打开命令菜单（Command+Shift+P）", kVK_ANSI_P, [.maskCommand, .maskShift], "⇧⌘P"),
+        openCodeShortcut(30, "打开设置", kVK_ANSI_Comma, .maskCommand, "⌘,"),
+        openCodeShortcut(31, "选择模型", kVK_ANSI_Quote, .maskCommand, "⌘'"),
+        openCodeShortcut(32, "循环切换模型变体", kVK_ANSI_D, [.maskCommand, .maskShift], "⇧⌘D"),
+        openCodeShortcut(33, "下一个 Agent", kVK_ANSI_Period, .maskCommand, "⌘."),
+        openCodeShortcut(34, "上一个 Agent", kVK_ANSI_Period, [.maskCommand, .maskShift], "⇧⌘."),
+        openCodeShortcut(35, "打开 MCP 菜单", kVK_ANSI_Semicolon, .maskCommand, "⌘;"),
+        openCodeShortcut(36, "切换自动批准", kVK_ANSI_A, [.maskCommand, .maskShift], "⇧⌘A"),
+        openCodeShortcut(37, "聚焦输入框", kVK_ANSI_L, .maskControl, "⌃L"),
+        openCodeShortcut(38, "将运行任务转入后台", kVK_ANSI_B, .maskControl, "⌃B"),
+        openCodeShortcut(39, "上一条消息", kVK_ANSI_LeftBracket, [.maskCommand, .maskAlternate], "⌥⌘["),
+        openCodeShortcut(40, "下一条消息", kVK_ANSI_RightBracket, [.maskCommand, .maskAlternate], "⌥⌘]"),
+        openCodeShortcut(41, "发送消息（按忙时设置）", kVK_Return, [], "Enter"),
+        openCodeShortcut(42, "切换忙时发送方式", kVK_Return, .maskCommand, "⌘Enter"),
+        openCodeShortcut(43, "输入时换行", kVK_Return, .maskShift, "⇧Enter"),
+        openCodeShortcut(44, "停止回复（Esc）", kVK_Escape, [], "Esc"),
+        openCodeShortcut(45, "停止回复（Control+G）", kVK_ANSI_G, .maskControl, "⌃G"),
+        openCodeShortcut(46, "打开斜杠命令", kVK_ANSI_Slash, [], "/"),
+        openCodeShortcut(47, "打开引用菜单", kVK_ANSI_2, .maskShift, "⇧2（@）"),
+        openCodeShortcut(48, "放大内容字号", kVK_ANSI_Equal, .maskCommand, "⌘="),
+        openCodeShortcut(49, "缩小内容字号", kVK_ANSI_Minus, .maskCommand, "⌘-"),
+        openCodeShortcut(50, "重置内容字号", kVK_ANSI_0, .maskCommand, "⌘0"),
+        openCodeShortcut(51, "转到会话标签页1", kVK_ANSI_1, .maskCommand, "⌘1"),
+        openCodeShortcut(52, "转到会话标签页2", kVK_ANSI_2, .maskCommand, "⌘2"),
+        openCodeShortcut(53, "转到会话标签页3", kVK_ANSI_3, .maskCommand, "⌘3"),
+        openCodeShortcut(54, "转到会话标签页4", kVK_ANSI_4, .maskCommand, "⌘4"),
+        openCodeShortcut(55, "转到会话标签页5", kVK_ANSI_5, .maskCommand, "⌘5"),
+        openCodeShortcut(56, "转到会话标签页6", kVK_ANSI_6, .maskCommand, "⌘6"),
+        openCodeShortcut(57, "转到会话标签页7", kVK_ANSI_7, .maskCommand, "⌘7"),
+        openCodeShortcut(58, "转到会话标签页8", kVK_ANSI_8, .maskCommand, "⌘8"),
+        openCodeShortcut(59, "转到会话标签页9", kVK_ANSI_9, .maskCommand, "⌘9"),
+    ]
+
     static func addingMissing(to macros: [SavedMacro], since version: Int) -> [SavedMacro] {
         let ids = Set(macros.map(\.id))
         let names = Set(macros.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
@@ -215,6 +281,7 @@ enum DefaultMacros {
             + (version < 2 ? recentCodexChats : [])
             + (version < 4 ? claude : [])
             + (version < 5 ? cursor + deepSeek + workBuddy : [])
+            + (version < 6 ? openCode : [])
         return macros + candidates.filter { !ids.contains($0.id) && !names.contains($0.name.lowercased()) }
     }
 
@@ -232,6 +299,10 @@ enum DefaultMacros {
 
     private static func workBuddyShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
         shortcut(number, name, key, flags, label, namespace: 9, prefix: "WorkBuddy-")
+    }
+
+    private static func openCodeShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
+        shortcut(number, name, key, flags, label, namespace: 11, prefix: "OpenCode-")
     }
 
     private static func shortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String, namespace: Int = 1, prefix: String = "Codex-") -> SavedMacro {

@@ -40,6 +40,7 @@ struct HarnessConfiguration: Equatable, Identifiable {
         Self(id: "cursor", name: "Cursor", bundleIdentifier: "com.todesktop.230313mzl4w4u92"),
         Self(id: "deepseek", name: "DeepSeek", bundleIdentifier: "com.deepseek.dsh"),
         workBuddy,
+        Self(id: "opencode", name: "OpenCode", bundleIdentifier: "ai.opencode.desktop"),
     ]
 
     /// Add newly introduced apps to saved configurations without replacing existing entries.

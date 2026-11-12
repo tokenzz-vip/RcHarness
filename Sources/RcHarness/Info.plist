@@ -14,8 +14,8 @@
     <string>en</string>
   </array>
   <key>CFBundleAllowMixedLocalizations</key><true/>
-  <key>CFBundleVersion</key><string>0.4.1</string>
-  <key>CFBundleShortVersionString</key><string>0.4.1</string>
+  <key>CFBundleVersion</key><string>0.5.0</string>
+  <key>CFBundleShortVersionString</key><string>0.5.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>SUFeedURL</key><string>https://github.com/tokenzz-vip/RcHarness/releases/latest/download/appcast.xml</string>
   <key>SUPublicEDKey</key><string>AWrcuwmK2DA/yHYVZJbY5UGyScF2ASniLA3JG0f6JX8=</string>

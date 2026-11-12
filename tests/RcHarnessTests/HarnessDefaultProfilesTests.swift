@@ -15,13 +15,13 @@ final class HarnessDefaultProfilesTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
     }
 
-    func testEveryRemoteHasFiveIndependentHarnessDefaults() throws {
+    func testEveryRemoteHasIndependentHarnessDefaults() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         var configurations: [String: [SavedKeyProfile]] = [:]
         var generatedIDs: Set<UUID> = []
         for remote in RemoteProfiles.all {
             model.selectRemoteProfile(remote.id)
-            XCTAssertEqual(model.profiles.count, 6)
+            XCTAssertEqual(model.profiles.count, HarnessConfiguration.defaults.count + 1)
             XCTAssertEqual(model.selectedProfileID, SavedKeyProfile.defaultID)
             XCTAssertNil(model.selectedHarnessID)
             XCTAssertEqual(model.defaultMapping, .defaults)
@@ -44,7 +44,7 @@ final class HarnessDefaultProfilesTests: XCTestCase {
         for remote in RemoteProfiles.all {
             restored.selectRemoteProfile(remote.id)
             XCTAssertEqual(restored.profiles, configurations[remote.id])
-            XCTAssertEqual(restored.harnesses.compactMap(\.profileID).count, 5)
+            XCTAssertEqual(restored.harnesses.compactMap(\.profileID).count, HarnessConfiguration.defaults.count)
         }
     }
 
@@ -75,7 +75,7 @@ final class HarnessDefaultProfilesTests: XCTestCase {
         for remote in RemoteProfiles.all {
             model.selectRemoteProfile(remote.id)
             let old = try XCTUnwrap(oldConfigurations[remote.id])
-            XCTAssertEqual(model.profiles.count, old.profiles.count + 2)
+            XCTAssertEqual(model.profiles.count, old.profiles.count + 3)
             for profile in old.profiles {
                 XCTAssertEqual(model.profiles.first { $0.id == profile.id }, profile)
             }
@@ -87,7 +87,7 @@ final class HarnessDefaultProfilesTests: XCTestCase {
             XCTAssertEqual(model.harnesses.first { $0.id == "claude" }?.profileID, old.harnessProfileIDs["claude"])
             XCTAssertEqual(model.harnesses.first { $0.id == "workbuddy" }?.profileID, old.harnessProfileIDs["workbuddy"])
             XCTAssertEqual(model.harnesses.first { $0.id == "cursor" }?.isEnabled, false)
-            for (id, name) in [("cursor", "Cursor 按键方案 2"), ("deepseek", "DeepSeek 按键方案")] {
+            for (id, name) in [("cursor", "Cursor 按键方案 2"), ("deepseek", "DeepSeek 按键方案"), ("opencode", "OpenCode 按键方案")] {
                 let harness = try XCTUnwrap(model.harnesses.first { $0.id == id })
                 let profile = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
                 XCTAssertEqual(profile.name, name)
@@ -96,7 +96,7 @@ final class HarnessDefaultProfilesTests: XCTestCase {
                 model.update(ButtonMapping(action: .paste), for: .buttonA, trigger: .single)
             }
             XCTAssertTrue(model.harnesses.allSatisfy(\.didInitializeDefaultProfile))
-            for id in ["claude", "cursor", "deepseek"] {
+            for id in ["claude", "cursor", "deepseek", "opencode"] {
                 XCTAssertTrue(model.bindProfile(nil, to: id))
             }
             upgradedProfiles[remote.id] = model.profiles

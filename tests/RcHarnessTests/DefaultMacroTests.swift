@@ -6,7 +6,7 @@ import XCTest
 final class DefaultMacroTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
-    private var newPresets: [SavedMacro] { DefaultMacros.cursor + DefaultMacros.deepSeek + DefaultMacros.workBuddy }
+    private var newPresets: [SavedMacro] { DefaultMacros.cursor + DefaultMacros.deepSeek + DefaultMacros.workBuddy + DefaultMacros.openCode }
     private var allPresets: [SavedMacro] { DefaultMacros.codex + DefaultMacros.claude + newPresets }
 
     override func setUp() async throws {
@@ -47,6 +47,7 @@ final class DefaultMacroTests: XCTestCase {
         XCTAssertEqual(model.macros.filter { $0.name.hasPrefix("Cursor-") }.count, 35)
         XCTAssertEqual(model.macros.filter { $0.name.hasPrefix("DeepSeek-") }.count, 27)
         XCTAssertEqual(model.macros.filter { $0.name.hasPrefix("WorkBuddy-") }.count, 24)
+        XCTAssertEqual(model.macros.filter { $0.name.hasPrefix("OpenCode-") }.count, 59)
         XCTAssertEqual(Set(model.macros.map(\.id)).count, model.macros.count)
         XCTAssertEqual(Set(model.macros.map(\.name)).count, model.macros.count)
         let stepIDs = model.macros.flatMap { $0.steps.map(\.id) }
@@ -130,6 +131,24 @@ final class DefaultMacroTests: XCTestCase {
             ("WorkBuddy-上一个标签页", 0x30, [.maskControl, .maskShift]),
             ("WorkBuddy-语音录制开关", 0x02, .maskCommand),
             ("WorkBuddy-唤起选择器", 0x13, .maskShift),
+            ("OpenCode-新建会话（Command+N）", 0x2D, .maskCommand),
+            ("OpenCode-新建会话（Command+T）", 0x11, .maskCommand),
+            ("OpenCode-关闭会话标签页", 0x0D, [.maskCommand, .maskAlternate]),
+            ("OpenCode-上一个会话", 0x7E, .maskAlternate),
+            ("OpenCode-下一个未读会话", 0x7D, [.maskAlternate, .maskShift]),
+            ("OpenCode-切换侧边栏", 0x0B, [.maskCommand, .maskShift]),
+            ("OpenCode-选择模型", 0x27, .maskCommand),
+            ("OpenCode-循环切换模型变体", 0x02, [.maskCommand, .maskShift]),
+            ("OpenCode-上一个 Agent", 0x2F, [.maskCommand, .maskShift]),
+            ("OpenCode-打开 MCP 菜单", 0x29, .maskCommand),
+            ("OpenCode-切换自动批准", 0x00, [.maskCommand, .maskShift]),
+            ("OpenCode-聚焦输入框", 0x25, .maskControl),
+            ("OpenCode-切换终端", 0x32, .maskControl),
+            ("OpenCode-停止回复（Esc）", 0x35, []),
+            ("OpenCode-停止回复（Control+G）", 0x05, .maskControl),
+            ("OpenCode-切换忙时发送方式", 0x24, .maskCommand),
+            ("OpenCode-转到会话标签页5", 0x17, .maskCommand),
+            ("OpenCode-转到会话标签页6", 0x16, .maskCommand),
         ]
         for (name, keyCode, flags) in cases {
             let macro = try XCTUnwrap(newPresets.first { $0.name == name })
@@ -182,7 +201,7 @@ final class DefaultMacroTests: XCTestCase {
         XCTAssertEqual(Array(upgraded.prefix(3)), SavedMacro.normalizingNames(in: existing))
         XCTAssertTrue(Set(upgraded.map(\.id)).isDisjoint(with: Set((DefaultMacros.codex + DefaultMacros.claude).map(\.id))))
         XCTAssertEqual(model.mapping, mapping)
-        XCTAssertEqual(defaults.integer(forKey: SettingsKeys.macroPresetsVersion), 5)
+        XCTAssertEqual(defaults.integer(forKey: SettingsKeys.macroPresetsVersion), DefaultMacros.version)
         XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).macros, upgraded)
 
         let oldBackup = SettingsBackup(mapping: mapping, profiles: [], macros: existing, phrases: [], macroPresetsVersion: 4)
@@ -198,7 +217,43 @@ final class DefaultMacroTests: XCTestCase {
         XCTAssertTrue(model.updateMacroSteps([MacroStep(mapping: ButtonMapping(action: .copy))], for: edited.id))
         let expected = model.macros
         let backup = try JSONDecoder().decode(SettingsBackup.self, from: JSONEncoder().encode(model.configurationBackup()))
-        XCTAssertEqual(backup.macroPresetsVersion, 5)
+        XCTAssertEqual(backup.macroPresetsVersion, DefaultMacros.version)
+        try model.applyConfiguration(backup)
+        XCTAssertEqual(model.macros, expected)
+        XCTAssertEqual(model.mapping, mapping)
+        XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).macros, expected)
+    }
+
+    func testVersionFiveUpgradeOnlyAddsOpenCodeAndPreservesEditsAndDeletionsAcrossImport() throws {
+        var renamed = DefaultMacros.openCode[0]
+        renamed.name = "我的 OpenCode 会话"
+        renamed.steps = [MacroStep(mapping: ButtonMapping(action: .paste), delay: 0.8)]
+        let collision = SavedMacro(name: "  oPeNcOdE-打开设置  ", steps: [MacroStep(mapping: ButtonMapping(action: .copy))])
+        let existing = [renamed, collision]
+        var mapping = RemoteMapping.defaults
+        mapping[.buttonA] = ButtonMapping(action: .macro, referenceID: renamed.id.uuidString)
+        mapping[.buttonB] = ButtonMapping(action: .macro, referenceID: collision.id.uuidString)
+        SettingsStorage.save(existing, SettingsKeys.Stored.macros, defaults: defaults)
+        defaults.set(5, forKey: SettingsKeys.macroPresetsVersion)
+
+        let model = RemoteDashboardModel(mapping: mapping, defaults: defaults)
+        let upgraded = model.macros
+        XCTAssertEqual(upgraded.count, DefaultMacros.openCode.count)
+        XCTAssertEqual(Array(upgraded.prefix(2)), SavedMacro.normalizingNames(in: existing))
+        let olderPresets = DefaultMacros.codex + DefaultMacros.claude + DefaultMacros.cursor + DefaultMacros.deepSeek + DefaultMacros.workBuddy
+        XCTAssertTrue(Set(upgraded.map(\.id)).isDisjoint(with: Set(olderPresets.map(\.id))))
+        XCTAssertEqual(model.mapping, mapping)
+        XCTAssertEqual(RemoteDashboardModel(mapping: .defaults, defaults: defaults).macros, upgraded)
+        try model.applyConfiguration(SettingsBackup(mapping: mapping, profiles: [], macros: existing, phrases: [], macroPresetsVersion: 5))
+        XCTAssertEqual(model.macros, upgraded)
+        XCTAssertEqual(model.mapping, mapping)
+
+        let added = try XCTUnwrap(model.macros.first { $0.id == DefaultMacros.openCode[1].id })
+        XCTAssertEqual(DefaultMacros.cardTitle(for: added), "新建会话（Command+T）")
+        model.deleteMacro(added.id)
+        let expected = model.macros
+        let backup = try JSONDecoder().decode(SettingsBackup.self, from: JSONEncoder().encode(model.configurationBackup()))
+        XCTAssertEqual(backup.macroPresetsVersion, DefaultMacros.version)
         try model.applyConfiguration(backup)
         XCTAssertEqual(model.macros, expected)
         XCTAssertEqual(model.mapping, mapping)
