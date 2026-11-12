@@ -43,6 +43,7 @@ cp "${ROOT}/assets/app/controller-dashboard-xiaomi-rc001.png" "${APP}/Contents/R
 cp "${ROOT}/assets/app/controller-dashboard-xiaomi-remote.png" "${APP}/Contents/Resources/controller-dashboard-xiaomi-remote.png"
 cp "${ROOT}/assets/app/controller-dashboard-google-g9n9n.png" "${APP}/Contents/Resources/controller-dashboard-google-g9n9n.png"
 "${ROOT}/scripts/build_microphone_driver.sh" "${APP}/Contents/PlugIns" "${SIGNING_MODE}"
+bash "${ROOT}/scripts/embed_sparkle.sh" "${APP}" "${SIGNING_MODE}"
 "${ROOT}/scripts/sign_macos_code.sh" "${APP}" vip.tokenzz.rcharness "${SIGNING_MODE}" "${ROOT}/scripts/RcHarness.entitlements"
 /usr/bin/codesign --verify --deep --strict "${APP}"
 if [[ -e "${OUT}" ]]; then mv "${OUT}" "${STAGE}/previous.app"; fi

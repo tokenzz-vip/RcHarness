@@ -134,8 +134,10 @@ struct ConnectionPage: View {
                 .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
             HStack {
                 Button(microphoneInstallTitle) { model.installMicrophone() }
+                    .disabled(model.microphoneOperationInProgress)
                 if model.microphoneComponentPresent {
                     Button("卸载…") { uninstallMicrophoneVisible = true }
+                        .disabled(model.microphoneOperationInProgress)
                 }
                 Button("系统默认输入…") { openSystemSettings("x-apple.systempreferences:com.apple.Sound-Settings.extension?input") }
             }.controlSize(.small)
@@ -149,6 +151,7 @@ struct ConnectionPage: View {
     }
 
     private var microphoneStatusTitle: String {
+        if model.microphoneOperationInProgress { return "正在处理…" }
         if model.microphoneUpdateAvailable { return "需要更新" }
         return model.microphoneInstalled ? "已安装" : "未安装"
     }

@@ -31,6 +31,11 @@ enum SettingsStyle {
     }
 
     static let subtle = Color.primary.opacity(0.035)
+    static let switchOn = Color.blue
+    static var inactiveSwitchOn: Color {
+        Color(nsColor: NSColor.systemBlue.blended(withFraction: 0.45, of: .systemGray) ?? .systemBlue)
+    }
+    static let switchOff = Color.primary.opacity(0.16)
     // Stronger contrast for the actionable cells inside mapping cards.
     static func mappingTriggerBackground(in colorScheme: ColorScheme, configured: Bool = true) -> Color {
         Color.primary.opacity(configured ? (colorScheme == .dark ? 0.12 : 0.115) : 0.035)

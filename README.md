@@ -81,7 +81,7 @@ Chromecast 遥控器另提供点按语音模式，固件兼容性需实机确认
 
 ## 开发
 
-项目使用 Swift、SwiftUI 和 Swift Package Manager，无第三方依赖。当前 CI 与发布使用 **Xcode 27.1 / Swift 6.4**，最低运行系统为 macOS 14。
+项目使用 Swift、SwiftUI 和 Swift Package Manager，通过 Sparkle 2 提供应用内更新（SwiftPM 固定版本及校验和）。当前 CI 与发布使用 **Xcode 27.1 / Swift 6.4**，最低运行系统为 macOS 14。
 
 本机构建前，将 `RC_HARNESS_LOCAL_SIGNING_IDENTITY` 设置为 `security find-identity -v -p codesigning` 列出的有效 Apple 签名身份，值不能是 `-`。若配置在 `~/.zshrc` 中，非交互构建时通过 `zsh -ic` 加载。
 
@@ -103,6 +103,14 @@ open .build/RcHarness.app
 ```
 
 详细说明：[界面与运行时行为](docs/behavior.md) · [小米 RC001-MS 适配](docs/xiaomi-rc001.md) · [Google G9N9N 适配](docs/google-g9n9n.md)
+
+### 应用内更新与发布
+
+在「设置」点击「检查更新…」，可在应用内查看新版本、下载、校验签名并重启安装。「自动检查更新」默认关闭，开启后由 Sparkle 定期检查，安装仍需用户确认。上次检查时间随设置保留。
+
+应用升级重启后，若本机已安装的虚拟麦克风组件版本较旧，会自动发起同步更新并请求 macOS 管理员授权；更新会短暂重启系统音频服务。取消或失败时在「连接与语音」重试。未安装组件的用户不会被自动安装。
+
+更新源为 GitHub Releases 最新正式版本的 `appcast.xml` 附件。首次接入前的旧版本仍需手动下载一次包含更新功能的新版。实现及发布维护步骤见 [更新发布说明](docs/app-updates.md)。
 
 ## 赞助商
 

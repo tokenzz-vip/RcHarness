@@ -127,6 +127,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         )
         NSApp.setActivationPolicy(dashboardModel.showDockIcon ? .regular : .accessory)
         if renderSettingsIfRequested() { return }
+        dashboardModel.updates.start()
         let workspaceNotifications = NSWorkspace.shared.notificationCenter
         workspaceNotifications.addObserver(self, selector: #selector(suspendVoice), name: NSWorkspace.willSleepNotification, object: nil)
         workspaceNotifications.addObserver(self, selector: #selector(resumeVoice), name: NSWorkspace.didWakeNotification, object: nil)
@@ -156,6 +157,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                                       recoveryAction: .connection, source: .microphoneUpdate)
         }
         updateStatusItem()
+        if dashboardModel.microphoneComponentPresent && dashboardModel.microphoneUpdateAvailable {
+            DispatchQueue.main.async { [weak self] in self?.installMicrophone(synchronizing: true) }
+        }
     }
 
     private func switchRemote(to profile: RemoteProfile) {
@@ -379,6 +383,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         voice.canStartCapture = { [weak self] in
             guard let self else { return false }
             return self.mode == .mapping && self.voiceSession.isIdle
+                && self.dashboardModel?.microphoneOperationInProgress != true
                 && !self.harnessSwitcher.model.isPresented && !self.phrasePicker.model.isPresented
         }
         voice.onStreamEvent = { [weak self] event in
@@ -432,6 +437,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             gestures.handle(input, pressed: pressed, mapping: mapping)
             return
         }
+        guard !dashboardModel.microphoneOperationInProgress else { return }
         guard !voice.identityRejected else {
             heldVoiceInput = nil
             voiceSession.cancel()
@@ -556,39 +562,65 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc func installMicrophone() {
+        installMicrophone(synchronizing: false)
+    }
+
+    private func installMicrophone(synchronizing: Bool) {
+        guard let dashboardModel, !dashboardModel.microphoneOperationInProgress else { return }
+        guard !synchronizing || (dashboardModel.microphoneComponentPresent && dashboardModel.microphoneUpdateAvailable) else { return }
+        dashboardModel.microphoneOperationInProgress = true
+        // Release the device before replacement and the coreaudiod restart.
+        heldVoiceInput = nil
+        voiceSession.cancel()
+        voice.cancelActiveStream()
+        dashboardModel.stopTestTone()
+        microphone.stop()
         Task { @MainActor in
+            defer { dashboardModel.microphoneOperationInProgress = false }
             do {
                 try await RemoteMicrophoneInstallation.install()
-                dashboardModel?.refreshDevices()
-                let receiver = dashboardModel?.outputDevices.first { $0.id == dashboardModel?.outputUID }?.name
+                dashboardModel.refreshDevices()
+                if synchronizing {
+                    dashboardModel.postNotice("虚拟麦克风组件已同步更新。系统音频服务已重启，请在语音应用中确认输入设备。", level: .success)
+                    return
+                }
+                let receiver = dashboardModel.outputDevices.first { $0.id == dashboardModel.outputUID }?.name
                 let alert = NSAlert()
                 alert.messageText = "安装完成"
                 alert.informativeText = VoiceSetupGuidance.installationComplete(receiverName: receiver)
                 alert.addButton(withTitle: "打开连接与语音")
                 alert.addButton(withTitle: "完成")
                 if alert.runModal() == .alertFirstButtonReturn {
-                    dashboardModel?.page = .connection
+                    dashboardModel.page = .connection
                     showWindow()
                 }
             } catch is CancellationError {
+                if synchronizing {
+                    dashboardModel.postNotice("麦克风组件更新已取消，可在「连接与语音」中继续更新。", level: .warning,
+                                              recoveryAction: .connection, source: .microphoneUpdate)
+                }
                 return
             } catch {
-                showAlert(title: "安装失败", message: error.localizedDescription)
+                dashboardModel.postNotice("麦克风组件安装失败：\(error.localizedDescription)", level: .error,
+                                          recoveryAction: .connection, source: .microphoneUpdate)
             }
         }
     }
 
     func uninstallMicrophone() {
+        guard let dashboardModel, !dashboardModel.microphoneOperationInProgress else { return }
+        dashboardModel.microphoneOperationInProgress = true
         // Release the HAL device before coreaudiod unloads it.
         heldVoiceInput = nil
         voiceSession.cancel()
         voice.cancelActiveStream()
-        dashboardModel?.stopTestTone()
+        dashboardModel.stopTestTone()
         microphone.stop()
         Task { @MainActor in
+            defer { dashboardModel.microphoneOperationInProgress = false }
             do {
                 try await RemoteMicrophoneInstallation.uninstall()
-                dashboardModel?.refreshDevices()
+                dashboardModel.refreshDevices()
                 showAlert(title: "已卸载", message: "RcHarness 麦克风组件已移除。语音应用中如仍选择该设备，请改为其他麦克风。")
             } catch is CancellationError {
                 return

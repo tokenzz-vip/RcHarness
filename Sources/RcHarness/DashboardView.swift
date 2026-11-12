@@ -226,7 +226,7 @@ struct RemoteDashboardView: View {
             get: { model.operationMode == .mapping },
             set: { _ in model.toggleMode() }
         ))
-        .toggleStyle(.switch).controlSize(.small).font(SettingsStyle.Typography.body)
+        .toggleStyle(SettingsSwitchStyle()).controlSize(.small).font(SettingsStyle.Typography.body)
         .fixedSize()
         .help("关闭后，遥控器按原生方式工作；重新开启此开关可恢复映射。")
         .accessibilityHint("关闭后，遥控器按原生方式工作；重新开启此开关可恢复映射。")

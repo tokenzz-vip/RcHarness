@@ -58,7 +58,10 @@ struct HarnessSettingsView: View {
                     VStack(alignment: .leading, spacing: 7) {
                         HStack(spacing: SettingsStyle.Spacing.inline) {
                             Text(harness.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                            if model.selectedHarnessID == harness.id { SettingsStatus(title: "当前", color: .accentColor) }
+                            // Reserve the badge's space so foreground changes never resize a row.
+                            SettingsStatus(title: "当前", color: .accentColor)
+                                .opacity(model.selectedHarnessID == harness.id ? 1 : 0)
+                                .accessibilityHidden(model.selectedHarnessID != harness.id)
                         }
                         HStack(spacing: 5) {
                             Circle().fill(harness.isEnabled && running ? Color.green : Color.secondary).frame(width: 5, height: 5)
@@ -91,7 +94,7 @@ struct HarnessSettingsView: View {
                 get: { model.harnesses.first(where: { $0.id == harness.id })?.isEnabled ?? false },
                 set: { model.setHarnessEnabled(harness.id, enabled: $0) }
             ))
-            .labelsHidden().toggleStyle(.switch).controlSize(.small)
+            .labelsHidden().toggleStyle(SettingsSwitchStyle()).controlSize(.small)
             .help("启用 \(harness.name) Harness")
             Menu {
                 Button("打开应用") { if let url { NSWorkspace.shared.open(url) } }.disabled(url == nil)

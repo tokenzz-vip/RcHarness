@@ -2,6 +2,69 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Keeps an enabled switch visibly on even when its window is inactive.
+struct SettingsSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        SettingsSwitchBody(configuration: configuration)
+    }
+}
+
+private struct SettingsSwitchBody: View {
+    let configuration: ToggleStyleConfiguration
+    @Environment(\.controlActiveState) private var activeState
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            LabeledContent {
+                // Let the native switch supply metrics for the current control size.
+                // Opacity keeps it laid out; hidden() would use fallback metrics.
+                Toggle("", isOn: .constant(configuration.isOn))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(controlSize)
+                    .disabled(true)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+                    .overlay {
+                        Capsule()
+                            .fill(configuration.isOn ? onColor : SettingsStyle.switchOff)
+                            .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                                Circle()
+                                    .fill(.white)
+                                    .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                                    .padding(2)
+                            }
+                            .opacity(isEnabled ? 1 : 0.5)
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: configuration.isOn)
+                    }
+            } label: {
+                configuration.label
+            }
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .focusable(isEnabled)
+        .focusEffectDisabled()
+        .onKeyPress(.space) {
+            guard isEnabled else { return .ignored }
+            configuration.isOn.toggle()
+            return .handled
+        }
+        .accessibilityRepresentation {
+            Toggle(configuration).toggleStyle(.switch)
+        }
+    }
+
+    private var onColor: Color {
+        activeState == .key ? SettingsStyle.switchOn : SettingsStyle.inactiveSwitchOn
+    }
+}
+
 struct SettingsPanel<Content: View>: View {
     let title: String
     let symbol: String?

@@ -14,9 +14,17 @@
     <string>en</string>
   </array>
   <key>CFBundleAllowMixedLocalizations</key><true/>
-  <key>CFBundleVersion</key><string>0.3.1</string>
-  <key>CFBundleShortVersionString</key><string>0.3.1</string>
+  <key>CFBundleVersion</key><string>0.4.0</string>
+  <key>CFBundleShortVersionString</key><string>0.4.0</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>SUFeedURL</key><string>https://github.com/tokenzz-vip/RcHarness/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>AWrcuwmK2DA/yHYVZJbY5UGyScF2ASniLA3JG0f6JX8=</string>
+  <key>SUEnableAutomaticChecks</key><false/>
+  <key>SUAutomaticallyUpdate</key><false/>
+  <key>SUAllowsAutomaticUpdates</key><false/>
+  <key>SUSendProfileInfo</key><false/>
+  <key>SUVerifyUpdateBeforeExtraction</key><true/>
+  <key>SURequireSignedFeed</key><true/>
   <key>LSUIElement</key><false/>
   <key>NSBluetoothAlwaysUsageDescription</key><string>连接遥控器及其内置麦克风。</string>
   <key>NSMicrophoneUsageDescription</key><string>将遥控器麦克风提供给语音应用。</string>

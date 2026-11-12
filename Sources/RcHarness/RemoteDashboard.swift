@@ -11,6 +11,7 @@ import SwiftUI
 /// re-renders only the views that show it.
 @MainActor
 final class RemoteDashboardModel: ObservableObject {
+    let updates = AppUpdateModel()
     @Published var page: SettingsPage = .mapping {
         didSet { if page != oldValue { flushPendingWrites() } }
     }
@@ -39,6 +40,7 @@ final class RemoteDashboardModel: ObservableObject {
     /// The HAL plug-in exists on disk (it may not be loaded until coreaudiod restarts).
     @Published var microphoneComponentPresent = RemoteMicrophoneInstallation.isInstalledOnDisk
     @Published var microphoneUpdateAvailable = RemoteMicrophoneInstallation.updateRequired
+    @Published var microphoneOperationInProgress = false
     @Published private(set) var globalButtons: GlobalButtonSettings {
         didSet {
             guard !isCommittingConfiguration else { return }
@@ -358,7 +360,7 @@ final class RemoteDashboardModel: ObservableObject {
         if isStreaming != active { isStreaming = active }
     }
     var audioBusy: Bool {
-        if isStreaming { return true }
+        if isStreaming || microphoneOperationInProgress { return true }
         return audioOutputState == .preparing || audioOutputState == .streaming || audioOutputState == .draining
     }
     var audioOutputDescription: String {

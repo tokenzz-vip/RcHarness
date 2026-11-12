@@ -7,12 +7,15 @@ let package = Package(
     products: [
         .executable(name: "RcHarness", targets: ["RcHarness"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"),
+    ],
     targets: [
         .target(name: "AudioExceptionGuard", path: "Sources/AudioExceptionGuard",
                 publicHeadersPath: "include", linkerSettings: [.linkedFramework("AVFoundation")]),
         .executableTarget(
             name: "RcHarness",
-            dependencies: ["AudioExceptionGuard"],
+            dependencies: ["AudioExceptionGuard", .product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/RcHarness",
             exclude: ["Info.plist"],
             swiftSettings: [
@@ -28,6 +31,7 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("IOKit"),
                 .linkedFramework("Security"),
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
             ]
         ),
         .testTarget(

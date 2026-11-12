@@ -40,10 +40,7 @@ struct AboutPage: View {
                                 .monospacedDigit().help("构建 \(AppInfo.build)")
                         }.font(SettingsStyle.Typography.body)
                         Text("Apple Silicon · macOS 14 及以上").font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
-                        HStack(spacing: SettingsStyle.Spacing.inline) {
-                            Button("检查更新…") {}.disabled(true).help("此本地构建尚未配置更新源")
-                            Button("版本历史") { NSWorkspace.shared.open(AppInfo.history) }
-                        }.controlSize(.small)
+                        AppUpdateSettingsView(model: model.updates)
                     }.frame(width: 236, alignment: .leading)
                 }.fixedSize(horizontal: false, vertical: true)
             }
@@ -66,17 +63,17 @@ struct AboutPage: View {
                 Divider()
                 SettingsPreference(symbol: "power", title: "启动行为", detail: "选择登录和打开应用时的行为。") {
                     HStack(spacing: SettingsStyle.Spacing.groups) {
-                        Toggle("登录时启动", isOn: Binding(get: { model.loginEnabled }, set: model.setLoginEnabled)).toggleStyle(.switch).controlSize(.small)
-                        Toggle("启动时打开主面板", isOn: $model.openAtLaunch).toggleStyle(.switch).controlSize(.small)
+                        Toggle("登录时启动", isOn: Binding(get: { model.loginEnabled }, set: model.setLoginEnabled)).toggleStyle(SettingsSwitchStyle()).controlSize(.small)
+                        Toggle("启动时打开主面板", isOn: $model.openAtLaunch).toggleStyle(SettingsSwitchStyle()).controlSize(.small)
                     }.font(SettingsStyle.Typography.caption)
                 }
                 Divider()
                 SettingsPreference(symbol: "dock.rectangle", title: "在 Dock 中显示应用图标", detail: "隐藏后仍可从菜单栏打开设置。") {
-                    Toggle("显示 Dock 图标", isOn: $model.showDockIcon).labelsHidden().toggleStyle(.switch)
+                    Toggle("显示 Dock 图标", isOn: $model.showDockIcon).labelsHidden().toggleStyle(SettingsSwitchStyle())
                 }
                 Divider()
                 SettingsPreference(symbol: "textformat.abc", title: "显示键位方案前缀", detail: "显示方案所属遥控器的固定前缀；隐藏不影响已保存的方案。") {
-                    Toggle("显示键位方案前缀", isOn: $model.showKeyProfilePrefix).labelsHidden().toggleStyle(.switch)
+                    Toggle("显示键位方案前缀", isOn: $model.showKeyProfilePrefix).labelsHidden().toggleStyle(SettingsSwitchStyle())
                 }
                 Divider()
                 SettingsPreference(symbol: "globe", title: "应用语言", detail: "当前界面使用简体中文。") {
@@ -138,5 +135,30 @@ struct AboutPage: View {
                 Button(granted ? "系统设置" : "前往授权", action: action).frame(width: 84)
             }
         }
+    }
+}
+
+private struct AppUpdateSettingsView: View {
+    @ObservedObject var model: AppUpdateModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
+            HStack(spacing: SettingsStyle.Spacing.inline) {
+                Button("检查更新…", action: model.checkForUpdates)
+                    .disabled(!model.canCheckForUpdates)
+                Button("版本历史") { NSWorkspace.shared.open(AppInfo.history) }
+            }.controlSize(.small)
+            Toggle("自动检查更新", isOn: Binding(
+                get: { model.automaticallyChecksForUpdates },
+                set: model.setAutomaticallyChecksForUpdates
+            ))
+            .toggleStyle(.checkbox)
+            .disabled(!model.isConfigured)
+            .font(SettingsStyle.Typography.caption)
+            Text(model.lastUpdateCheckDate.map {
+                "上次检查：\($0.formatted(date: .abbreviated, time: .shortened))"
+            } ?? "尚未检查更新")
+            .foregroundStyle(.secondary)
+        }.font(SettingsStyle.Typography.caption)
     }
 }
