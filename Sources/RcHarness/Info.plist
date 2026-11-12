@@ -14,8 +14,8 @@
     <string>en</string>
   </array>
   <key>CFBundleAllowMixedLocalizations</key><true/>
-  <key>CFBundleVersion</key><string>0.3.0</string>
-  <key>CFBundleShortVersionString</key><string>0.3.0</string>
+  <key>CFBundleVersion</key><string>0.3.1</string>
+  <key>CFBundleShortVersionString</key><string>0.3.1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><false/>
   <key>NSBluetoothAlwaysUsageDescription</key><string>连接遥控器及其内置麦克风。</string>

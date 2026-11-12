@@ -1,43 +1,66 @@
 # RcHarness
 
-## ❤️ 赞助商
+RcHarness 是一款原生 macOS 菜单栏应用，通过蓝牙遥控器操作 Codex、Claude、Cursor 等 AI 对话与编程应用。支持自定义按键、应用切换、常用语输入和按住说话，无需额外转接硬件。
 
+**按键方案随当前 Harness 应用自动切换**，同一实体按键可在不同软件中执行不同动作。
 
-| 赞助商 | 介绍 |
-|---|---|
-| <a href="https://tokenzz.vip/"><img src="assets/sponsors/tokenzz.png" alt="TokenZZ 标志" width="96" height="96"><br></a> | 我们只是 token 的搬运工，官方纯净 token 转发。 |
+**运行环境：Apple Silicon Mac · macOS 14+ · 简体中文界面**
 
----
+[下载应用](https://github.com/tokenzz-vip/RcHarness/releases) · [快速开始](#快速开始) · [反馈问题](https://github.com/tokenzz-vip/RcHarness/issues)
 
-## 简介
+![按键映射界面：以小米遥控器和 Codex 方案展示单击、双击、长按动作及实体按键对应关系](docs/images/key-mapping.png)
 
-用蓝牙遥控器操作 Mac 上的 Codex、Claude、Cursor 等 AI 对话与编程应用。
-
-RcHarness 是原生 macOS 菜单栏应用，支持按键映射、应用切换和按住说话，无需额外转接硬件。
-
-[下载应用](https://github.com/tokenzz-vip/RcHarness/releases) · [反馈问题](https://github.com/tokenzz-vip/RcHarness/issues)
-
-## 功能
+## 核心功能
 
 - **自定义按键**：为单击、双击和长按设置快捷键、鼠标操作、系统动作或常用语。
-- **应用与方案**：为不同应用绑定键位方案，通过遥控器切换运行中的应用。
-- **语音输入**：将遥控器麦克风作为虚拟输入设备，配合语音应用按住说话；Chromecast 遥控器另可选择点按模式（固件兼容性需实机确认）。语音快捷键通过按键面板选择：长按支持 Fn 和左右 Command／Option／Control 七个单键，点按另支持其中任意两个不同键的组合；小米点按保持禁用。
-- **组合动作**：将多个操作和等待时间串成一个动作。
-- **本地管理**：配置导入导出、连接诊断与使用统计；统计不记录音频或听写内容。
+- **应用与方案**：为不同 Harness 应用绑定各自的按键方案，切换应用时自动加载对应方案。
+- **快速切换**：通过遥控器唤出运行中的 Harness 列表，选择并切换应用。
+- **语音输入**：通过虚拟麦克风将遥控器音频传递给语音应用，支持按住说话。
+- **常用语**：保存常用指令，分配至五向按键；单击、双击分别输入两组内容。
+- **组合动作**：将多个操作与等待时间编排为可重复执行的动作。
+- **配置与诊断**：支持配置导入导出、连接诊断和本机使用统计；统计不记录音频或听写内容。
+
+## 界面预览
+
+### 应用与方案
+
+每个 Harness 应用可绑定独立的按键方案。切换到 Codex、Claude 或 Cursor 等时，RcHarness 自动加载该应用对应的方案，让按键操作适配当前软件的快捷键与工作流。
+
+方案按遥控器型号分别保存，也可由多个应用共用；全局按键与语音触发设置在同一遥控器型号的方案间共享。
+
+![Harness 界面：为 Codex、Claude、Cursor 等应用绑定按键方案并管理启用状态](docs/images/harness.png)
+
+### 快速切换 Harness
+
+默认**单击电源键**唤出运行中的 Harness 列表，使用**左右方向键**选择应用，按**确认 OK**切换。切换后自动应用目标软件绑定的按键方案；按返回或主页键可关闭列表。
+
+![快速切换 Harness 浮层：通过左右方向键选择 Codex、Claude、Cursor 等应用，确认后切换并加载对应按键方案](docs/images/harness-switcher.png)
+
+### 连接与语音
+
+集中查看按键与语音连接状态，选择音频接收设备、调整增益并发送测试音。虚拟麦克风组件可在此安装或更新。
+
+![连接与语音界面：遥控器状态、音频接收设备、增益调节与虚拟麦克风组件](docs/images/connection-voice.png)
+
+### 常用语
+
+内置继续执行、检查结果、解释一下等常用指令，支持编辑、排序和五向分配。每条常用语可保存两组内容，用于中英文指令或不同表达。
+
+![常用语界面：五向按键分配、指令列表及两组内容编辑器](docs/images/phrases.png)
 
 ## 系统与设备
-
-需要 **Apple Silicon Mac、macOS 14 或更高版本**，界面为简体中文。
 
 | 遥控器 | 型号 | 支持能力 |
 |---|---|---|
 | 小米蓝牙遥控器 2 | RC001-MS | 按键映射、按住说话 |
 | 小米蓝牙遥控器 2 Pro | RC003-MS | 按键映射、按住说话 |
-| Google Chromecast 遥控器 | G9N9N | 按键映射、按住说话 |
+| Google Chromecast 遥控器 | G9N9N | 按键映射、按住说话、点按说话 |
 
 > **兼容性提示**：Google 遥控器仅验证了拼多多店铺「金利达数码科技大全」销售的 G9N9N。其他店铺、批次或同型号产品尚未验证，兼容性不作保证。
 
-## 安装与开始使用
+Chromecast 遥控器另提供点按语音模式，固件兼容性需实机确认；小米遥控器仅支持按住说话。触发模式与快捷键选择见[行为说明](docs/behavior.md)。
+
+## 快速开始
 
 1. 从 [发布页面](https://github.com/tokenzz-vip/RcHarness/releases) 下载应用压缩包，解压后将 `RcHarness.app` 移入“应用程序”。
 2. 在 macOS 蓝牙设置中配对遥控器，在 RcHarness 的“连接与语音”页选择对应型号。
@@ -47,7 +70,7 @@ RcHarness 是原生 macOS 菜单栏应用，支持按键映射、应用切换和
 
 虚拟麦克风组件随应用提供，首次安装需要管理员授权。RcHarness 负责传递音频，语音识别由目标语音应用处理。
 
-默认全局按键为电源键：**单击**打开运行中的 Harness 列表，**双击**系统区域截图，**长按**切换到原生模式。进入原生模式后，从主面板或菜单栏恢复映射。全局按键和各型号配置均可单独调整。
+默认电源键操作：**单击**打开运行中的应用列表，**双击**区域截图，**长按**切换至原生模式。可从主面板或菜单栏恢复映射，也可自行调整全局按键。
 
 ## 常见问题
 
@@ -80,6 +103,12 @@ open .build/RcHarness.app
 ```
 
 详细说明：[界面与运行时行为](docs/behavior.md) · [小米 RC001-MS 适配](docs/xiaomi-rc001.md) · [Google G9N9N 适配](docs/google-g9n9n.md)
+
+## 赞助商
+
+| 赞助商 | 介绍 |
+|---|---|
+| <a href="https://tokenzz.vip/"><img src="assets/sponsors/tokenzz.png" alt="TokenZZ 标志" width="96" height="96"></a> | 我们只是 token 的搬运工，官方纯净 token 转发。 |
 
 ## 致谢
 
