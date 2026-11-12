@@ -1,10 +1,56 @@
 import AppKit
 import SwiftUI
+import Sparkle
 import XCTest
 @testable import RcHarness
 
 @MainActor
 final class AppUpdateTests: XCTestCase {
+    func testLocalVersionNewerThanFeedDoesNotOfferAnUpdate() throws {
+        let olderRelease = try release(version: "0.4.0", build: "999")
+        XCTAssertTrue(AppUpdateReleasePolicy.bestUpdate(in: [olderRelease], currentVersion: "0.4.1")
+                      === SUAppcastItem.empty())
+    }
+
+    func testSameVersionDoesNotOfferAnUpdateEvenWithHigherBuildNumber() throws {
+        let sameRelease = try release(version: "0.4.1", build: "999")
+        XCTAssertTrue(AppUpdateReleasePolicy.bestUpdate(in: [sameRelease], currentVersion: "0.4.1")
+                      === SUAppcastItem.empty())
+    }
+
+    func testNewerVersionsUseNumericComponentsAndFeedOrderDoesNotMatter() throws {
+        let sameRelease = try release(version: "0.4.9", build: "99999")
+        let nextRelease = try release(version: "0.4.10", build: "1000")
+        let latestRelease = try release(version: "0.5.0", build: "1001")
+        XCTAssertTrue(AppUpdateReleasePolicy.bestUpdate(in: [nextRelease], currentVersion: "0.4.9")
+                      === nextRelease)
+        for items in [[latestRelease, sameRelease, nextRelease], [nextRelease, sameRelease, latestRelease]] {
+            XCTAssertTrue(AppUpdateReleasePolicy.bestUpdate(in: items, currentVersion: "0.4.9")
+                          === latestRelease)
+        }
+    }
+
+    func testEmptyFeedDoesNotOfferAnUpdate() {
+        XCTAssertTrue(AppUpdateReleasePolicy.bestUpdate(in: [], currentVersion: "0.4.1")
+                      === SUAppcastItem.empty())
+    }
+
+    func testNewestBuildIsChosenWithinANewerRelease() throws {
+        let firstBuild = try release(version: "0.4.2", build: "20")
+        let secondBuild = try release(version: "0.4.2", build: "21")
+        XCTAssertTrue(AppUpdateReleasePolicy.bestUpdate(in: [secondBuild, firstBuild], currentVersion: "0.4.1")
+                      === secondBuild)
+    }
+
+    private func release(version: String, build: String) throws -> SUAppcastItem {
+        // These fixtures only use version fields, never system-dependent properties.
+        try XCTUnwrap(SUAppcastItem(dictionary: [
+            "sparkle:version": build,
+            "sparkle:shortVersionString": version,
+            "enclosure": ["url": "https://example.com/RcHarness-\(version).zip"],
+        ]))
+    }
+
     func testConfigurationRequiresHTTPSAndAnEd25519PublicKey() {
         let key = Data(repeating: 7, count: 32).base64EncodedString()
         let valid: [String: Any] = ["SUFeedURL": "https://example.com/appcast.xml", "SUPublicEDKey": key]

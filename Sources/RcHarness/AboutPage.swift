@@ -41,7 +41,7 @@ struct AboutPage: View {
                         }.font(SettingsStyle.Typography.body)
                         Text("Apple Silicon · macOS 14 及以上").font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
                         AppUpdateSettingsView(model: model.updates)
-                    }.frame(width: 236, alignment: .leading)
+                    }.frame(width: 340, alignment: .leading)
                 }.fixedSize(horizontal: false, vertical: true)
             }
             GlobalButtonsPanel(model: model)
@@ -148,17 +148,20 @@ private struct AppUpdateSettingsView: View {
                     .disabled(!model.canCheckForUpdates)
                 Button("版本历史") { NSWorkspace.shared.open(AppInfo.history) }
             }.controlSize(.small)
-            Toggle("自动检查更新", isOn: Binding(
-                get: { model.automaticallyChecksForUpdates },
-                set: model.setAutomaticallyChecksForUpdates
-            ))
-            .toggleStyle(.checkbox)
-            .disabled(!model.isConfigured)
-            .font(SettingsStyle.Typography.caption)
-            Text(model.lastUpdateCheckDate.map {
-                "上次检查：\($0.formatted(date: .abbreviated, time: .shortened))"
-            } ?? "尚未检查更新")
-            .foregroundStyle(.secondary)
+            HStack(spacing: SettingsStyle.Spacing.inline) {
+                Toggle("自动检查更新", isOn: Binding(
+                    get: { model.automaticallyChecksForUpdates },
+                    set: model.setAutomaticallyChecksForUpdates
+                ))
+                .toggleStyle(.checkbox)
+                .disabled(!model.isConfigured)
+                .fixedSize()
+                Text(model.lastUpdateCheckDate.map {
+                    "上次检查：\($0.formatted(date: .abbreviated, time: .shortened))"
+                } ?? "尚未检查更新")
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            }
         }.font(SettingsStyle.Typography.caption)
     }
 }

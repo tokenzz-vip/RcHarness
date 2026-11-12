@@ -218,7 +218,7 @@ struct RemoteDashboardView: View {
             }
         }
         .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, 18)
-        .frame(minHeight: 82)
+        .frame(height: SettingsStyle.pageHeaderHeight)
     }
 
     private var mappingToggle: some View {

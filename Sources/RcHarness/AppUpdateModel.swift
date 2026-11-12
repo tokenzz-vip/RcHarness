@@ -84,6 +84,27 @@ final class AppUpdateModel: ObservableObject {
     }
 }
 
+enum AppUpdateReleasePolicy {
+    static func bestUpdate(in items: [SUAppcastItem], currentVersion: String) -> SUAppcastItem {
+        let comparator = SUStandardVersionComparator()
+        let latest = items.max {
+            let releaseOrder = comparator.compareVersion($0.displayVersionString, toVersion: $1.displayVersionString)
+            if releaseOrder == .orderedSame {
+                return comparator.compareVersion($0.versionString, toVersion: $1.versionString) == .orderedAscending
+            }
+            return releaseOrder == .orderedAscending
+        }
+        // Local builds use a release version for CFBundleVersion, while CI uses
+        // a run number. Only a newer display version represents a new release.
+        guard let latest,
+              comparator.compareVersion(latest.displayVersionString, toVersion: currentVersion) == .orderedDescending else {
+            // Sparkle presents its normal "up to date" result for an empty selection.
+            return SUAppcastItem.empty()
+        }
+        return latest
+    }
+}
+
 @MainActor
 private final class SparkleUpdateDriver: NSObject, AppUpdateDriving, SPUUpdaterDelegate {
     private var controller: SPUStandardUpdaterController!
@@ -116,6 +137,10 @@ private final class SparkleUpdateDriver: NSObject, AppUpdateDriving, SPUUpdaterD
     }
 
     func checkForUpdates() { controller.checkForUpdates(nil) }
+
+    func bestValidUpdate(in appcast: SUAppcast, for updater: SPUUpdater) -> SUAppcastItem? {
+        AppUpdateReleasePolicy.bestUpdate(in: appcast.items, currentVersion: AppInfo.version)
+    }
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         // A successful "no update" result is presented by Sparkle itself.

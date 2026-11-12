@@ -47,7 +47,7 @@ private struct SettingsSwitchBody: View {
             }
             .fixedSize()
         }
-        .buttonStyle(.plain)
+        .buttonStyle(SettingsSwitchButtonStyle())
         .focusable(isEnabled)
         .focusEffectDisabled()
         .onKeyPress(.space) {
@@ -62,6 +62,14 @@ private struct SettingsSwitchBody: View {
 
     private var onColor: Color {
         activeState == .key ? SettingsStyle.switchOn : SettingsStyle.inactiveSwitchOn
+    }
+}
+
+/// The switch supplies its own state feedback; pressing must not dim its label.
+private struct SettingsSwitchButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
     }
 }
 

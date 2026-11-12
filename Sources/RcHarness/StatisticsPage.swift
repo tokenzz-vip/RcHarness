@@ -20,13 +20,9 @@ struct StatisticsPage: View {
         let summary = UsageSummary(usage: store.usage, range: range)
         let recordedButtons = summary.buttonRanking.filter { $0.value > 0 }
         VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(range.title) · \(summary.dateRangeLabel)")
-                    .font(SettingsStyle.Typography.body.weight(.medium))
-                Text("所有遥控器累计 · 同名按键合并，不区分型号；以下指标、图表与排行使用同一范围。")
-                    .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("所有遥控器累计 · 同名按键合并，不区分型号；以下指标、图表与排行使用同一范围。")
+                .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: SettingsStyle.Spacing.controls) {
                 metric("按键总次数", value: "\(summary.pressCount)")
                 metric("语音时长", value: duration(summary.voiceSeconds))

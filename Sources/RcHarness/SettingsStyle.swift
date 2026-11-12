@@ -5,6 +5,7 @@ import SwiftUI
 /// these values describe repeated layout roles, not a mandatory grid for every number.
 enum SettingsStyle {
     static let sidebarWidth: CGFloat = 108
+    static let pageHeaderHeight: CGFloat = 94
     static let pagePadding: CGFloat = 24
     static let panelPadding: CGFloat = 20
     static let controlPadding: CGFloat = 12

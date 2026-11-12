@@ -59,9 +59,16 @@ struct PhrasesPage: View {
                 }
                 .frame(maxWidth: .infinity)
                 Spacer(minLength: 24)
-                VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
+                VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
                     instructionRow("1.circle", title: "单击", detail: "输入内容 1")
                     instructionRow("2.circle", title: "双击", detail: "输入内容 2")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(SettingsStyle.controlPadding)
+                .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: SettingsStyle.controlRadius)
+                        .strokeBorder(Color.primary.opacity(0.10))
                 }
                 Spacer(minLength: 24)
                 VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
@@ -92,11 +99,12 @@ struct PhrasesPage: View {
         HStack(spacing: SettingsStyle.Spacing.inline) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.accentColor)
                 .frame(width: 18)
-            Text(title).font(SettingsStyle.Typography.body.weight(.medium))
-            Text(detail).font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
+            Text(title).font(SettingsStyle.Typography.body.weight(.semibold))
+            Text(detail).font(SettingsStyle.Typography.body.weight(.medium))
         }
+        .foregroundStyle(.primary)
     }
 
     private func assignmentTitle(_ input: ControllerInput) -> String {
@@ -385,6 +393,7 @@ private struct PhrasePadSector: Shape {
 }
 
 private struct PhrasePadKeyStyle<S: Shape>: ButtonStyle {
+    @Environment(\.colorScheme) private var colorScheme
     let shape: S
     let hovered: Bool
     let pressed: Bool
@@ -393,9 +402,14 @@ private struct PhrasePadKeyStyle<S: Shape>: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(.primary)
-            .background(shape.fill(Color.primary.opacity(configuration.isPressed || pressed ? 0.12 : hovered ? 0.07 : 0.035)))
+            .background {
+                shape.fill(SettingsStyle.mappingTriggerBackground(in: colorScheme))
+                    .overlay {
+                        shape.fill(Color.primary.opacity(configuration.isPressed || pressed ? 0.10 : hovered ? 0.05 : 0))
+                    }
+            }
             .overlay {
-                shape.stroke(focused ? Color.accentColor : Color.primary.opacity(hovered ? 0.18 : 0.10),
+                shape.stroke(focused ? Color.accentColor : Color.primary.opacity(hovered ? 0.24 : 0.16),
                              lineWidth: focused ? 2 : 1)
             }
             .contentShape(shape)
