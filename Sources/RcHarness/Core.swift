@@ -231,7 +231,7 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
     case mouseLeft, mouseRight, pointerUp, pointerDown, pointerLeft, pointerRight
     case scrollUp, scrollDown, volumeUp, volumeDown, recordedShortcut, openApplication, disabled
     case leftCommand, fn, leftOption, rightOption, playPause, mute, phrase, macro
-    case openHarnessSwitcher, openPhrases
+    case openHarnessSwitcher, openPhrases, showAllWindows, switchApplications
 
     static let voiceTriggerActions: [Self] = [.fn, .leftCommand, .rightCommand, .leftOption, .rightOption]
 
@@ -249,6 +249,8 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
         case .switchToNativeMode: "切换到原生模式"
         case .rightCommand: "按住右侧 Command"
         case .screenshot: "系统区域截图 (⌘⇧4)"
+        case .showAllWindows: "查看所有窗口 (Control + ↑)"
+        case .switchApplications: "切换应用 (⌘ Tab)"
         case .copy: "复制 (⌘C)"
         case .paste: "粘贴 (⌘V)"
         case .browserBack: "浏览器后退 (⌘[)"

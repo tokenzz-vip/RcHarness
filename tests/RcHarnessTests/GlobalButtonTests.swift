@@ -25,7 +25,7 @@ final class GlobalButtonTests: XCTestCase {
         let clock = TestClock()
         let gestures = RemoteGestureController(schedule: clock.schedule)
         var actions: [RemoteAction] = []
-        gestures.onOutput = { if $1 { actions.append($0.action) } }
+        gestures.onOutput = { value, pressed, _ in if pressed { actions.append(value.action) } }
         gestures.handle(.power, pressed: true, mapping: model.effectiveMapping)
         gestures.handle(.power, pressed: false, mapping: model.effectiveMapping)
         XCTAssertTrue(actions.isEmpty, "Single click waits for the double-click window")
@@ -159,7 +159,7 @@ final class GlobalButtonTests: XCTestCase {
         let clock = TestClock()
         let gestures = RemoteGestureController(schedule: clock.schedule)
         var actions: [RemoteAction] = []
-        gestures.onOutput = { if $1 { actions.append($0.action) } }
+        gestures.onOutput = { value, pressed, _ in if pressed { actions.append(value.action) } }
         gestures.handle(.power, pressed: true, mapping: model.effectiveMapping)
         gestures.handle(.power, pressed: false, mapping: model.effectiveMapping)
         model.saveProfile(name: "另一个方案")

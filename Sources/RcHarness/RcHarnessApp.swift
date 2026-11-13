@@ -19,6 +19,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     private var renderDefaultsSuite: String?
     private var mapping = RemoteMapping.defaults
     private let gestures = RemoteGestureController()
+    private lazy var applicationSwitcher = ApplicationSwitcherController { [weak self] mapping, pressed in
+        self?.sender.send(mapping, pressed: pressed)
+    }
     private var heldVoiceInput: ControllerInput?
     private var voiceStopInputs: Set<ControllerInput> = []
     private lazy var harnessSwitcher = HarnessSwitcherController(
@@ -84,6 +87,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         dashboardModel.onInstallMicrophone = { [weak self] in self?.installMicrophone() }
         dashboardModel.onUninstallMicrophone = { [weak self] in self?.uninstallMicrophone() }
         dashboardModel.onRescan = { [weak self] in
+            self?.applicationSwitcher.reset()
             self?.harnessSwitcher.model.reset(reason: "rescan")
             self?.phrasePicker.model.reset()
             self?.hid.rescan()
@@ -115,7 +119,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 self?.voice.cancelActiveStream()
             }
         }
-        gestures.onOutput = { [weak self] mapping, pressed in self?.sendAction(mapping, pressed: pressed) }
+        gestures.onOutput = { [weak self] mapping, pressed, input in
+            self?.sendAction(mapping, pressed: pressed, input: input)
+        }
         windowController = DashboardWindowController(model: dashboardModel)
         windowController.onWindowClose = { [weak self] in
             // Closing the only window leaves RcHarness running from the menu
@@ -163,6 +169,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     private func switchRemote(to profile: RemoteProfile) {
+        applicationSwitcher.reset()
         remoteSelectionRevision += 1
         let revision = remoteSelectionRevision
         hid.onConnectionChange = nil
@@ -222,6 +229,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if renderDefaultsSuite != nil { return .terminateNow }
+        applicationSwitcher.reset()
         hid.stop()
         voice.stop()
         voiceSession.cancel {
@@ -231,6 +239,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        applicationSwitcher.reset()
         harnessSwitcher.model.reset(reason: "termination")
         phrasePicker.model.reset()
         dashboardModel?.flushPendingWrites()
@@ -251,6 +260,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     /// Switch to the key profile bound to the newly active application.
     @objc private func foregroundApplicationChanged(_ notification: Notification) {
         let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+        applicationSwitcher.confirm()
         harnessSwitcher.model.dismiss(reason: "foreground-application-changed")
         phrasePicker.model.dismiss()
         guard app?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
@@ -258,6 +268,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func suspendVoice() {
+        applicationSwitcher.reset()
         harnessSwitcher.model.reset(reason: "sleep")
         phrasePicker.model.reset()
         dashboardModel?.flushPendingWrites()
@@ -334,6 +345,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.dashboardModel?.setConnected(connected)
             if !connected {
+                self.applicationSwitcher.reset()
                 self.harnessSwitcher.model.reset(reason: "remote-disconnected")
                 self.phrasePicker.model.reset()
                 self.gestures.cancel()
@@ -347,7 +359,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self.updateStatusItem()
         }
         hid.onButtonInput = { [weak self] input, pressed in
-            if input == .options, self?.voice.voiceMode == .tap {
+            if input == .options, self?.voice.voiceMode == .tap, self?.applicationSwitcher.isPresented != true {
                 self?.voice.receiveTapButton(pressed: pressed)
                 return
             }
@@ -356,6 +368,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         }
         hid.onButtonCancelled = { [weak self] input in
             guard let self else { return }
+            self.applicationSwitcher.cancel(input)
             self.gestures.cancel(input)
             self.phrasePicker.model.cancel(input)
             if self.heldVoiceInput == input {
@@ -385,9 +398,11 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             return self.mode == .mapping && self.voiceSession.isIdle
                 && self.dashboardModel?.microphoneOperationInProgress != true
                 && !self.harnessSwitcher.model.isPresented && !self.phrasePicker.model.isPresented
+                && !self.applicationSwitcher.isPresented
         }
         voice.onStreamEvent = { [weak self] event in
             guard self?.harnessSwitcher.model.isPresented != true,
+                  self?.applicationSwitcher.isPresented != true,
                   self?.phrasePicker.model.isPresented != true else { return }
             if case .started = event {
                 self?.dashboardModel?.stopTestTone()
@@ -398,12 +413,19 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         }
         voice.onSamples = { [weak self] samples in
             guard self?.harnessSwitcher.model.isPresented != true,
+                  self?.applicationSwitcher.isPresented != true,
                   self?.phrasePicker.model.isPresented != true else { return }
             self?.voiceSession.append(samples)
         }
     }
 
     private func handle(input: ControllerInput, pressed: Bool) {
+        if applicationSwitcher.handle(input, pressed: pressed) {
+            // Keep the other modal routers' physical key tracking up to date.
+            _ = phrasePicker.model.handle(input, pressed: pressed)
+            _ = harnessSwitcher.model.handle(input, pressed: pressed)
+            return
+        }
         if voiceStopInputs.contains(input) {
             if !pressed { voiceStopInputs.remove(input) }
             return
@@ -463,9 +485,20 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func sendAction(_ button: ButtonMapping, pressed: Bool) {
-        if button.action == .openPhrases {
+    private func sendAction(_ button: ButtonMapping, pressed: Bool, input: ControllerInput? = nil) {
+        if button.action == .switchApplications {
+            guard pressed, mode == .mapping, let input else { return }
+            harnessSwitcher.model.dismiss(reason: "application-switcher-opened")
+            phrasePicker.model.dismiss()
+            gestures.cancel()
+            cancelMacros()
+            heldVoiceInput = nil
+            voiceSession.cancel()
+            voice.cancelActiveStream()
+            applicationSwitcher.present(input: input)
+        } else if button.action == .openPhrases {
             guard pressed, mode == .mapping else { return }
+            applicationSwitcher.cancel()
             if phrasePicker.model.isPresented {
                 phrasePicker.model.dismiss()
             } else {
@@ -479,11 +512,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             }
         } else if button.action == .openHarnessSwitcher {
             guard pressed, mode == .mapping else { return }
+            applicationSwitcher.cancel()
             if harnessSwitcher.model.isPresented {
                 harnessSwitcher.model.dismiss(reason: "open-action-toggle")
             } else {
                 phrasePicker.model.dismiss()
-                harnessSwitcher.show()
+                harnessSwitcher.show(input: input)
                 gestures.cancel()
                 cancelMacros()
                 heldVoiceInput = nil
@@ -537,6 +571,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     private func setOperationMode(_ newMode: ControllerOperationMode) {
+        applicationSwitcher.reset()
         guard mode != newMode else { return }
         harnessSwitcher.model.reset(reason: "mode-changed")
         phrasePicker.model.reset()
@@ -647,6 +682,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     @objc private func showExistingWindow(_ notification: Notification) { showWindow() }
 
     @objc private func showWindow() {
+        applicationSwitcher.cancel()
         harnessSwitcher.model.dismiss(reason: "dashboard-opened")
         phrasePicker.model.dismiss()
         if NSApp.currentEvent?.type == .rightMouseUp {
@@ -695,7 +731,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         seedStatistics(historyDays: 400)
         let pages = SettingsPage.allCases
         func render(_ index: Int) {
-            guard index <= pages.count + 17 else { NSApp.terminate(nil); return }
+            guard index <= pages.count + 19 else { NSApp.terminate(nil); return }
+            let applicationSwitcherPreview = index == pages.count + 19
             let codexPreview = index == pages.count
             let switcherPreview = index == pages.count + 1
             let voiceEditorPreview = index == pages.count + 2
@@ -713,7 +750,16 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             let audioFailurePreview = index == pages.count + 15
             let statisticsYearsPreview = index == pages.count + 16
             let statisticsMonthsPreview = index == pages.count + 17
-            if statisticsYearsPreview || statisticsMonthsPreview {
+            let macroEditorPreview = index == pages.count + 18
+            if macroEditorPreview {
+                for notice in dashboardModel.actionNotices { dashboardModel.dismissNotice(notice.id) }
+                dashboardModel.page = .mapping
+                dashboardModel.selectedInput = .buttonY
+                dashboardModel.selectedTrigger = .long
+                dashboardModel.update(ButtonMapping(action: .macro, referenceID: dashboardModel.macros.first?.id.uuidString),
+                                      for: .buttonY, trigger: .long)
+                windowController.window?.makeKeyAndOrderFront(nil)
+            } else if statisticsYearsPreview || statisticsMonthsPreview {
                 for notice in dashboardModel.actionNotices { dashboardModel.dismissNotice(notice.id) }
                 dashboardModel.audioOutputState = .idle
                 dashboardModel.page = .statistics
@@ -766,6 +812,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 dashboardModel.phrases = DefaultPhrases.all
                 dashboardModel.phraseAssignments = DefaultPhrases.assignments(for: dashboardModel.phrases)
                 windowController.window?.makeKeyAndOrderFront(nil)
+            } else if applicationSwitcherPreview {
+                dashboardModel.page = .mapping
+                dashboardModel.selectedInput = .home
+                dashboardModel.selectedTrigger = .single
+                dashboardModel.update(ButtonMapping(action: .switchApplications), for: .home, trigger: .single)
+                windowController.window?.makeKeyAndOrderFront(nil)
             } else if rapidDeletePreview {
                 dashboardModel.page = .mapping
                 dashboardModel.selectedInput = .buttonB
@@ -798,9 +850,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 windowController.window?.makeKeyAndOrderFront(nil)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
-                let filename = statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : codexPreview ? "mapping-codex" : pages[index].rawValue
-                let voiceEditor = voiceEditorPreview || rapidDeletePreview ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel, actionFilter: .constant(.all))) : nil
-                voiceEditor?.frame = NSRect(x: 0, y: 0, width: 560, height: 560)
+                let filename = applicationSwitcherPreview ? "application-switcher-editor" : macroEditorPreview ? "macro-editor" : statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : codexPreview ? "mapping-codex" : pages[index].rawValue
+                let voiceEditor = voiceEditorPreview || rapidDeletePreview || macroEditorPreview || applicationSwitcherPreview ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel, actionFilter: .constant(applicationSwitcherPreview ? .system : .all))) : nil
+                voiceEditor?.frame = NSRect(x: 0, y: 0, width: 560, height: macroEditorPreview ? 460 : 560)
                 let isNewProfile = index == pages.count + 3
                 let nameEditor = profileNamePreview ? NSHostingView(rootView: ProfileNameSheet(
                     title: isNewProfile ? "新建按键方案" : "重命名按键方案", symbol: isNewProfile ? "plus" : "pencil",
@@ -853,6 +905,37 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                         view.cacheDisplay(in: view.bounds, to: bitmap)
                         if let data = bitmap.representation(using: .png, properties: [:]) {
                             try? data.write(to: directory.appendingPathComponent(filename + ".png"))
+                        }
+                    }
+                }
+                if macroEditorPreview {
+                    for width in [636, 456, 240, 180] {
+                        let tags = NSHostingView(rootView: MacroTagFilter(selection: .constant(Set(MacroTag.all.map(\.id))))
+                            .frame(width: CGFloat(width))
+                            .padding(SettingsStyle.pagePadding)
+                            .background(Color(nsColor: .controlBackgroundColor)))
+                        tags.frame.size = tags.fittingSize
+                        tags.layoutSubtreeIfNeeded()
+                        if let bitmap = tags.bitmapImageRepForCachingDisplay(in: tags.bounds) {
+                            tags.cacheDisplay(in: tags.bounds, to: bitmap)
+                            if let data = bitmap.representation(using: .png, properties: [:]) {
+                                try? data.write(to: directory.appendingPathComponent("macro-tags-\(width).png"))
+                            }
+                        }
+                    }
+                    for tagID in ["codex", "cursor", MacroTag.general.id] {
+                        let picker = NSHostingView(rootView: MacroReferencePicker(
+                            referenceID: .constant(dashboardModel.macros.first?.id.uuidString), tagIDs: .constant([tagID]), model: dashboardModel)
+                            .padding(SettingsStyle.pagePadding)
+                            .frame(width: 560)
+                            .background(Color(nsColor: .controlBackgroundColor)))
+                        picker.frame.size = picker.fittingSize
+                        picker.layoutSubtreeIfNeeded()
+                        if let bitmap = picker.bitmapImageRepForCachingDisplay(in: picker.bounds) {
+                            picker.cacheDisplay(in: picker.bounds, to: bitmap)
+                            if let data = bitmap.representation(using: .png, properties: [:]) {
+                                try? data.write(to: directory.appendingPathComponent("macro-picker-" + tagID + ".png"))
+                            }
                         }
                     }
                 }

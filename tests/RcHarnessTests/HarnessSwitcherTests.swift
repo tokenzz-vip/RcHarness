@@ -57,7 +57,7 @@ final class HarnessSwitcherTests: XCTestCase {
                                            long: ButtonMapping(action: .macro)).applying(to: .defaults)
         let parser = XiaomiRemoteHIDParser()
         var actions: [RemoteAction] = []
-        gestures.onOutput = { value, pressed in
+        gestures.onOutput = { value, pressed, _ in
             guard pressed else { return }
             actions.append(value.action)
             if value.action == .openHarnessSwitcher {
@@ -178,6 +178,45 @@ final class HarnessSwitcherTests: XCTestCase {
         XCTAssertEqual(activated, [20])
     }
 
+    func testTriggerKeyRepeatsSelectionAndAutoConfirmsAfterTwoSecondsOfIdle() {
+        let clock = TestClock()
+        let model = HarnessSwitcherModel(schedule: clock.schedule)
+        var activated: [Int32] = []
+        model.onConfirm = { activated.append($0.id) }
+        model.handle(.home, pressed: true)
+        model.present(items: items, frontmostProcessID: 20, triggerInput: .home)
+        XCTAssertEqual(model.selectedID, 20)
+        model.handle(.home, pressed: false)
+        clock.advance(1.99)
+        XCTAssertTrue(model.isPresented)
+        model.handle(.home, pressed: true)
+        XCTAssertEqual(model.selectedID, 10)
+        model.handle(.home, pressed: false)
+        clock.advance(1.99)
+        XCTAssertTrue(model.isPresented)
+        clock.advance(0.01)
+        XCTAssertFalse(model.isPresented)
+        XCTAssertEqual(activated, [10])
+    }
+
+    func testTriggerKeyHeldRepeatsAndStopsOnReleaseWithoutLeakingToNormalRouting() {
+        let clock = TestClock()
+        let model = HarnessSwitcherModel(schedule: clock.schedule)
+        model.handle(.home, pressed: true)
+        model.present(items: items, frontmostProcessID: 20, triggerInput: .home)
+        clock.advance(HarnessSwitcherModel.repeatDelay)
+        XCTAssertEqual(model.selectedID, 10)
+        clock.advance(HarnessSwitcherModel.repeatInterval + 0.01)
+        XCTAssertEqual(model.selectedID, 20)
+        model.handle(.home, pressed: false)
+        let selected = model.selectedID
+        clock.advance(HarnessSwitcherModel.repeatInterval * 5)
+        XCTAssertEqual(model.selectedID, selected)
+        model.handle(.home, pressed: false)
+        clock.advance(HarnessSwitcherModel.confirmationDelay)
+        XCTAssertFalse(model.isPresented)
+    }
+
     func testDismissConsumesAllHeldReleasesAndResetRestoresNormalRouting() {
         for cancel in [ControllerInput.buttonB, .home, .menu] {
             let model = HarnessSwitcherModel()
@@ -236,7 +275,7 @@ final class HarnessSwitcherTests: XCTestCase {
         mapping[.dpadRight] = ButtonMapping(action: .paste)
         mapping[.dpadRight, .double] = ButtonMapping(action: .copy)
         mapping[.dpadRight, .long] = ButtonMapping(action: .screenshot)
-        gestures.onOutput = { value, pressed in
+        gestures.onOutput = { value, pressed, _ in
             if value.action == .openHarnessSwitcher {
                 if pressed {
                     model.present(items: self.items, frontmostProcessID: nil)
@@ -273,7 +312,7 @@ final class HarnessSwitcherTests: XCTestCase {
         var mapping = RemoteMapping.defaults
         mapping[.dpadRight, .double] = ButtonMapping(action: .copy)
         var output: [RemoteAction] = []
-        gestures.onOutput = { if $1 { output.append($0.action) } }
+        gestures.onOutput = { value, pressed, _ in if pressed { output.append(value.action) } }
         gestures.handle(.dpadRight, pressed: true, mapping: mapping)
         gestures.handle(.dpadRight, pressed: false, mapping: mapping)
         gestures.cancel()

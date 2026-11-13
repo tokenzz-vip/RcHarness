@@ -16,6 +16,13 @@ enum DefaultMacros {
     private static let presetNames = Dictionary(uniqueKeysWithValues:
         (codex + claude + cursor + deepSeek + workBuddy + openCode).map { ($0.id, $0.name) })
 
+    private static let presetTagIDs = Dictionary(uniqueKeysWithValues:
+        (codex + claude + cursor + deepSeek + workBuddy + openCode).map { ($0.id, $0.tagIDs) })
+
+    static func legacyTagIDs(for id: UUID) -> Set<String> {
+        presetTagIDs[id] ?? [MacroTag.general.id]
+    }
+
     // macOS defaults: https://learn.chatgpt.com/docs/reference/commands
     // IDs stay fixed so importing an older backup can recognize renamed presets.
     private static let originalCodex: [SavedMacro] = [
@@ -286,31 +293,31 @@ enum DefaultMacros {
     }
 
     private static func claudeShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
-        shortcut(number, name, key, flags, label, namespace: 3, prefix: "Claude-")
+        shortcut(number, name, key, flags, label, namespace: 3, prefix: "Claude-", tagID: "claude")
     }
 
     private static func cursorShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
-        shortcut(number, name, key, flags, label, namespace: 5, prefix: "Cursor-")
+        shortcut(number, name, key, flags, label, namespace: 5, prefix: "Cursor-", tagID: "cursor")
     }
 
     private static func deepSeekShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
-        shortcut(number, name, key, flags, label, namespace: 7, prefix: "DeepSeek-")
+        shortcut(number, name, key, flags, label, namespace: 7, prefix: "DeepSeek-", tagID: "deepseek")
     }
 
     private static func workBuddyShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
-        shortcut(number, name, key, flags, label, namespace: 9, prefix: "WorkBuddy-")
+        shortcut(number, name, key, flags, label, namespace: 9, prefix: "WorkBuddy-", tagID: "workbuddy")
     }
 
     private static func openCodeShortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String) -> SavedMacro {
-        shortcut(number, name, key, flags, label, namespace: 11, prefix: "OpenCode-")
+        shortcut(number, name, key, flags, label, namespace: 11, prefix: "OpenCode-", tagID: "opencode")
     }
 
-    private static func shortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String, namespace: Int = 1, prefix: String = "Codex-") -> SavedMacro {
+    private static func shortcut(_ number: Int, _ name: String, _ key: Int, _ flags: CGEventFlags, _ label: String, namespace: Int = 1, prefix: String = "Codex-", tagID: String = "codex") -> SavedMacro {
         let suffix = String(format: "%012d", number)
         let id = UUID(uuidString: String(format: "C0DE%04d-0000-0000-0000-", namespace) + suffix)!
         let stepID = UUID(uuidString: String(format: "C0DE%04d-0000-0000-0000-", namespace + 1) + suffix)!
         let mapping = ButtonMapping(action: .recordedShortcut,
                                     shortcut: RecordedShortcut(keyCode: UInt16(key), modifiers: flags.rawValue, label: label))
-        return SavedMacro(id: id, name: prefix + name, steps: [MacroStep(id: stepID, mapping: mapping, delay: 0)])
+        return SavedMacro(id: id, name: prefix + name, steps: [MacroStep(id: stepID, mapping: mapping, delay: 0)], tagIDs: [tagID])
     }
 }

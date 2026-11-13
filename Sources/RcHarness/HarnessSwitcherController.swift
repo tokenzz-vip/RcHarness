@@ -31,8 +31,9 @@ final class HarnessSwitcherController {
         for observer in observers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
     }
 
-    func show() {
-        model.present(items: runningItems(), frontmostProcessID: NSWorkspace.shared.frontmostApplication?.processIdentifier)
+    func show(input: ControllerInput? = nil) {
+        model.present(items: runningItems(), frontmostProcessID: NSWorkspace.shared.frontmostApplication?.processIdentifier,
+                      triggerInput: input)
         showPanel()
     }
 

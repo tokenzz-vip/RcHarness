@@ -179,7 +179,7 @@ final class SettingsTests: XCTestCase {
         let clock = TestClock()
         let engine = RemoteGestureController(schedule: clock.schedule)
         var events: [(RemoteAction, Bool)] = []
-        engine.onOutput = { events.append(($0.action, $1)) }
+        engine.onOutput = { value, pressed, _ in events.append((value.action, pressed)) }
         func sendPower(_ pressed: Bool) {
             for event in parser.parse(usagePage: 0x0C, usage: 0x30, value: pressed ? 1 : 0) {
                 engine.handle(event.input, pressed: event.isPressed, mapping: restored)
@@ -240,7 +240,7 @@ final class SettingsTests: XCTestCase {
     func testImmediateGestureReleasesOriginalMappingAfterEdit() {
         let engine = RemoteGestureController()
         var events: [(RemoteAction, Bool)] = []
-        engine.onOutput = { events.append(($0.action, $1)) }
+        engine.onOutput = { value, pressed, _ in events.append((value.action, pressed)) }
         var mapping = RemoteMapping.defaults
         engine.handle(.buttonA, pressed: true, mapping: mapping)
         mapping[.buttonA] = ButtonMapping(action: .copy)
@@ -254,7 +254,7 @@ final class SettingsTests: XCTestCase {
         let clock = TestClock()
         let engine = RemoteGestureController(schedule: clock.schedule)
         var events: [RemoteAction] = []
-        engine.onOutput = { if $1 { events.append($0.action) } }
+        engine.onOutput = { value, pressed, _ in if pressed { events.append(value.action) } }
         var mapping = RemoteMapping.defaults
         mapping[.buttonA, .double] = ButtonMapping(action: .copy)
         engine.handle(.buttonA, pressed: true, mapping: mapping)
@@ -270,7 +270,7 @@ final class SettingsTests: XCTestCase {
         let clock = TestClock()
         let engine = RemoteGestureController(schedule: clock.schedule)
         var events: [RemoteAction] = []
-        engine.onOutput = { if $1 { events.append($0.action) } }
+        engine.onOutput = { value, pressed, _ in if pressed { events.append(value.action) } }
         var mapping = RemoteMapping.defaults
         mapping[.buttonA, .long] = ButtonMapping(action: .paste)
         engine.handle(.buttonA, pressed: true, mapping: mapping)
@@ -284,7 +284,7 @@ final class SettingsTests: XCTestCase {
         let clock = TestClock()
         let engine = RemoteGestureController(schedule: clock.schedule)
         var events: [(RemoteAction, Bool)] = []
-        engine.onOutput = { events.append(($0.action, $1)) }
+        engine.onOutput = { value, pressed, _ in events.append((value.action, pressed)) }
         var mapping = RemoteMapping.defaults
         engine.handle(.dpadUp, pressed: true, mapping: mapping)
         mapping[.buttonA, .double] = ButtonMapping(action: .copy)

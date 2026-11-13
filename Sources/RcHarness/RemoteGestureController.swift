@@ -30,7 +30,8 @@ final class RemoteGestureController {
     private let schedule: RemoteVoiceSessionController.Scheduler
     private var sessions: [ControllerInput: Session] = [:]
     private var operationMode: ControllerOperationMode = .mapping
-    var onOutput: ((ButtonMapping, Bool) -> Void)?
+    // Modal actions need the originating input even after a delayed gesture.
+    var onOutput: ((ButtonMapping, Bool, ControllerInput) -> Void)?
 
     init(schedule: @escaping RemoteVoiceSessionController.Scheduler = RemoteVoiceSessionController.mainQueue) {
         self.schedule = schedule
@@ -65,7 +66,7 @@ final class RemoteGestureController {
                     scheduleRapidDelete(session, input: input, mapping: session.single, after: Self.rapidDeleteDelay)
                 } else {
                     logResolution(session.single, input: input, trigger: .single, session: session)
-                    onOutput?(session.single, true)
+                    onOutput?(session.single, true, input)
                 }
             } else { scheduleLongPress(session, input: input) }
         } else {
@@ -74,7 +75,7 @@ final class RemoteGestureController {
             session.work?.cancel()
             session.repeatWork?.cancel()
             if session.immediate {
-                if session.single.action != .rapidDelete { onOutput?(session.single, false) }
+                if session.single.action != .rapidDelete { onOutput?(session.single, false, input) }
                 sessions[input] = nil
             }
             else if session.longFired { sessions[input] = nil }
@@ -105,8 +106,8 @@ final class RemoteGestureController {
     private func scheduleRapidDelete(_ session: Session, input: ControllerInput, mapping: ButtonMapping, after delay: TimeInterval) {
         session.repeatWork = schedule(delay) { [weak self, weak session] in
             guard let self, let session, self.sessions[input] === session, session.held else { return }
-            self.onOutput?(mapping, true)
-            self.onOutput?(mapping, false)
+            self.onOutput?(mapping, true, input)
+            self.onOutput?(mapping, false, input)
             self.scheduleRapidDelete(session, input: input, mapping: mapping, after: Self.rapidDeleteInterval)
         }
     }
@@ -119,19 +120,19 @@ final class RemoteGestureController {
             }
             session.work?.cancel()
             session.repeatWork?.cancel()
-            if session.immediate && session.held && session.single.action != .rapidDelete { onOutput?(session.single, false) }
+            if session.immediate && session.held && session.single.action != .rapidDelete { onOutput?(session.single, false, input) }
         }
     }
     func cancel(_ input: ControllerInput) {
         guard let session = sessions.removeValue(forKey: input) else { return }
         session.work?.cancel()
         session.repeatWork?.cancel()
-        if session.immediate && session.held && session.single.action != .rapidDelete { onOutput?(session.single, false) }
+        if session.immediate && session.held && session.single.action != .rapidDelete { onOutput?(session.single, false, input) }
     }
     private func tap(_ mapping: ButtonMapping, input: ControllerInput, trigger: ButtonTrigger, session: Session) {
         logResolution(mapping, input: input, trigger: trigger, session: session)
-        onOutput?(mapping, true)
-        onOutput?(mapping, false)
+        onOutput?(mapping, true, input)
+        onOutput?(mapping, false, input)
     }
 
     private func logResolution(_ mapping: ButtonMapping, input: ControllerInput, trigger: ButtonTrigger, session: Session) {

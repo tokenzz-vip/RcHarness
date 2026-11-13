@@ -7,6 +7,13 @@ struct MacrosPage: View {
     @Binding var actionFilter: ActionFilter
     @State private var selectedMacroID: UUID?
     @State private var macroNameDraft: String
+    @State private var selectedTagIDs: Set<String> = []
+
+    private var visibleMacros: [SavedMacro] {
+        model.macros.filter { macro in
+            selectedTagIDs.isEmpty || !macro.tagIDs.isDisjoint(with: selectedTagIDs)
+        }
+    }
 
     init(model: RemoteDashboardModel, actionFilter: Binding<ActionFilter>) {
         self.model = model
@@ -16,24 +23,34 @@ struct MacrosPage: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: SettingsStyle.Spacing.groups) {
-            macroList.frame(width: 230)
-            if let index = model.macros.firstIndex(where: { $0.id == selectedMacroID }) {
-                editor(index).id(model.macros[index].id)
-            } else {
-                SettingsPanel {
-                    SettingsEmpty(symbol: "point.3.connected.trianglepath.dotted", title: "一次按键，依次完成", detail: "添加键盘、应用和媒体操作，再回到按键映射绑定单击、双击或长按。")
-                    Spacer(minLength: 0)
+        GeometryReader { geometry in
+            let columnsWidth = max(0, geometry.size.width - SettingsStyle.Spacing.groups)
+            // Widen the library with the window, while reserving room for step editing.
+            let listWidth = min(min(360, max(260, columnsWidth * 0.32)), max(0, columnsWidth - 520))
+            HStack(alignment: .top, spacing: SettingsStyle.Spacing.groups) {
+                macroList.frame(width: listWidth)
+                if let index = model.macros.firstIndex(where: { $0.id == selectedMacroID }) {
+                    editor(index).id(model.macros[index].id)
+                } else {
+                    SettingsPanel {
+                        SettingsEmpty(symbol: "point.3.connected.trianglepath.dotted", title: "一次按键，依次完成", detail: "添加键盘、应用和媒体操作，再回到按键映射绑定单击、双击或长按。")
+                        Spacer(minLength: 0)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: selectedMacroID) { _, id in
             macroNameDraft = model.macros.first(where: { $0.id == id })?.name ?? ""
         }
         .onChange(of: model.macros.map(\.id)) { _, ids in
             if !ids.contains(where: { $0 == selectedMacroID }) {
-                selectedMacroID = ids.first
+                selectedMacroID = visibleMacros.first?.id
+            }
+        }
+        .onChange(of: selectedTagIDs) { _, _ in
+            if !visibleMacros.contains(where: { $0.id == selectedMacroID }) {
+                selectedMacroID = visibleMacros.first?.id
             }
         }
     }
@@ -53,6 +70,9 @@ struct MacrosPage: View {
                 }
             }
             .padding(.trailing, SettingsStyle.panelPadding - SettingsStyle.compactControlPadding)
+            tagFilterPicker
+                .accessibilityLabel("按标签筛选组合动作")
+                .padding(.trailing, SettingsStyle.panelPadding - SettingsStyle.compactControlPadding)
             Divider().padding(.trailing, SettingsStyle.panelPadding - SettingsStyle.compactControlPadding)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -63,13 +83,25 @@ struct MacrosPage: View {
                                 Text("创建第一个组合动作").frame(maxWidth: .infinity)
                             }.buttonStyle(.borderedProminent)
                         }
-                        ForEach(model.macros) { macro in
+                        if !model.macros.isEmpty && visibleMacros.isEmpty {
+                            SettingsEmpty(symbol: "tag", title: "此标签下还没有动作", detail: "切换标签，或新建一个组合动作。")
+                            Button("显示全部动作") { selectedTagIDs.removeAll() }
+                                .buttonStyle(.link)
+                        }
+                        ForEach(visibleMacros) { macro in
                             Button { selectedMacroID = macro.id } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text(macro.name).font(.system(size: 13, weight: .medium))
                                             .lineLimit(2)
                                         Text("\(macro.steps.count) 个步骤").font(.caption).foregroundStyle(.secondary)
+                                        if !macro.tagIDs.isEmpty {
+                                            Text(tagSummary(macro))
+                                                .font(SettingsStyle.Typography.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                                .help(tagSummary(macro))
+                                        }
                                     }
                                     Spacer(minLength: 4)
                                     Image(systemName: "chevron.right").foregroundStyle(.tertiary)
@@ -95,7 +127,40 @@ struct MacrosPage: View {
     }
 
     private func addMacro() {
-        selectedMacroID = model.addMacro()
+        selectedMacroID = model.addMacro(tagIDs: selectedTagIDs.isEmpty ? [MacroTag.general.id] : selectedTagIDs)
+    }
+
+    private var tagFilterPicker: some View {
+        MacroTagFilter(selection: $selectedTagIDs)
+    }
+
+    private func tagSummary(_ macro: SavedMacro) -> String {
+        MacroTag.all.filter { macro.tagIDs.contains($0.id) }.map(\.name).joined(separator: " · ")
+    }
+
+    private func tagEditor(_ macro: SavedMacro) -> some View {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
+            HStack(spacing: SettingsStyle.Spacing.inline) {
+                Text("标签").font(SettingsStyle.Typography.body.weight(.semibold))
+                Text("可多选，仅用于筛选").font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), alignment: .leading)],
+                      alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
+                ForEach(MacroTag.all) { tag in
+                    Toggle(tag.name, isOn: Binding(
+                        get: { model.macros.first(where: { $0.id == macro.id })?.tagIDs.contains(tag.id) ?? false },
+                        set: { isOn in
+                            guard var tags = model.macros.first(where: { $0.id == macro.id })?.tagIDs else { return }
+                            if isOn { tags.insert(tag.id) } else { tags.remove(tag.id) }
+                            model.updateMacroTags(tags, for: macro.id)
+                        }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .font(SettingsStyle.Typography.body)
+                    .accessibilityLabel("\(tag.name)标签")
+                }
+            }
+        }
     }
 
     private func editor(_ index: Int) -> some View {
@@ -116,6 +181,7 @@ struct MacrosPage: View {
             if let nameError {
                 Text(nameError).font(.caption).foregroundStyle(.red)
             }
+            tagEditor(macro)
             Divider()
             ScrollViewReader { proxy in
                 ScrollView {

@@ -5,6 +5,7 @@ import Foundation
 /// macOS virtual key codes (HIToolbox kVK_*) used by the built-in actions.
 enum VirtualKey {
     static let returnKey: CGKeyCode = 0x24
+    static let tab: CGKeyCode = 0x30
     static let delete: CGKeyCode = 0x33
     static let escape: CGKeyCode = 0x35
     static let upArrow: CGKeyCode = 0x7E
@@ -107,6 +108,10 @@ final class SystemEventSender {
             guard pressed else { return }
             shortcutEvent(RecordedShortcut(keyCode: VirtualKey.four,
                 modifiers: CGEventFlags.maskCommand.union(.maskShift).rawValue, label: "⌘⇧4"))
+        case .showAllWindows:
+            guard pressed else { return }
+            shortcutEvent(RecordedShortcut(keyCode: VirtualKey.upArrow,
+                modifiers: CGEventFlags.maskControl.rawValue, label: "Control + ↑"))
         case .mouseLeft: mouse(.left, pressed: pressed)
         case .mouseRight: mouse(.right, pressed: pressed)
         case .pointerUp: move(0, -12, pressed: pressed)
@@ -123,7 +128,7 @@ final class SystemEventSender {
         case .volumeDown: mediaKey(MediaKey.soundDown, pressed: pressed)
         case .mute: mediaKey(MediaKey.mute, pressed: pressed)
         case .playPause: mediaKey(MediaKey.play, pressed: pressed)
-        case .phrase, .macro, .switchToNativeMode, .openHarnessSwitcher, .openPhrases, .disabled: break
+        case .phrase, .macro, .switchToNativeMode, .openHarnessSwitcher, .openPhrases, .switchApplications, .disabled: break
         }
     }
 
@@ -162,7 +167,16 @@ final class SystemEventSender {
 
     private func key(_ code: CGKeyCode, flags: CGEventFlags = [], pressed: Bool, source: CGEventSource? = nil) {
         let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: pressed)
-        event?.flags = flags.union(heldModifiers)
+        var eventFlags = flags.union(heldModifiers)
+        switch code {
+        case VirtualKey.upArrow, VirtualKey.downArrow, VirtualKey.leftArrow, VirtualKey.rightArrow:
+            // Native arrow events carry both flags even when Fn is not held.
+            // Mission Control and Spaces require them for shortcut matching.
+            // Apply them only to this event so they cannot become held modifiers.
+            eventFlags.formUnion([.maskSecondaryFn, .maskNumericPad])
+        default: break
+        }
+        event?.flags = eventFlags
         if let event { postEvent(event) }
     }
 

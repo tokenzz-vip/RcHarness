@@ -11,7 +11,7 @@ enum MacroExecutionError: LocalizedError, Equatable {
         case .circularReference(let name): "组合动作「\(name)」存在循环引用，请修改后重试。"
         case .missingReference: "组合动作中的引用未设置或已删除，请重新选择。"
         case .tooManySteps: "组合动作展开后超过 100 个步骤，请减少步骤或嵌套调用。"
-        case .unsupportedAction: "组合动作不支持模式切换、打开 Harness 列表或唤出常用语，请移除该步骤后重试。"
+        case .unsupportedAction: "组合动作不支持模式切换、切换应用、打开 Harness 列表或唤出常用语，请移除该步骤后重试。"
         }
     }
 }
@@ -41,7 +41,7 @@ struct MacroExecutionPlan {
                 guard remainingSteps > 0 else { throw MacroExecutionError.tooManySteps }
                 remainingSteps -= 1
                 guard step.mapping.action != .switchToNativeMode, step.mapping.action != .openHarnessSwitcher,
-                      step.mapping.action != .openPhrases else {
+                      step.mapping.action != .openPhrases, step.mapping.action != .switchApplications else {
                     throw MacroExecutionError.unsupportedAction
                 }
                 if step.mapping.action == .macro {

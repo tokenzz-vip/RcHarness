@@ -16,7 +16,7 @@ final class RapidDeleteTests: XCTestCase {
         init() {
             engine = RemoteGestureController(schedule: clock.schedule)
             mapping[.buttonB] = ButtonMapping(action: .rapidDelete)
-            engine.onOutput = { [weak self] mapping, pressed in
+            engine.onOutput = { [weak self] mapping, pressed, _ in
                 guard let self else { return }
                 if pressed { self.actions.append(mapping.action) }
                 self.sender.send(mapping, pressed: pressed)
@@ -138,7 +138,7 @@ final class RapidDeleteTests: XCTestCase {
             mapping[.buttonB] = ButtonMapping(action: longBinding ? .backspace : .rapidDelete)
             if longBinding { mapping[.buttonB, .long] = ButtonMapping(action: .rapidDelete) }
             var edges: [(RemoteAction, Bool)] = []
-            engine.onOutput = { edges.append(($0.action, $1)) }
+            engine.onOutput = { value, pressed, _ in edges.append((value.action, pressed)) }
             engine.handle(.buttonB, pressed: true, mapping: mapping)
             let obsolete = callbacks
             XCTAssertFalse(obsolete.isEmpty)

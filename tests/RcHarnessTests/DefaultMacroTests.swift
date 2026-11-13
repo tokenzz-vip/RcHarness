@@ -113,7 +113,7 @@ final class DefaultMacroTests: XCTestCase {
             ("Cursor-接受全部更改", 0x24, .maskCommand),
             ("Cursor-循环切换 Agent 模式", 0x30, .maskShift),
             ("Cursor-切换模型", 0x2C, [.maskCommand, .maskAlternate]),
-            ("Cursor-接受建议的下一个词", 0x7C, .maskCommand),
+            ("Cursor-接受建议的下一个词", 0x7C, [.maskCommand, .maskSecondaryFn, .maskNumericPad]),
             ("Cursor-打开引用菜单", 0x13, .maskShift),
             ("DeepSeek-重命名会话", 0x05, [.maskCommand, .maskAlternate]),
             ("DeepSeek-分叉会话", 0x03, [.maskCommand, .maskAlternate]),
@@ -134,8 +134,8 @@ final class DefaultMacroTests: XCTestCase {
             ("OpenCode-新建会话（Command+N）", 0x2D, .maskCommand),
             ("OpenCode-新建会话（Command+T）", 0x11, .maskCommand),
             ("OpenCode-关闭会话标签页", 0x0D, [.maskCommand, .maskAlternate]),
-            ("OpenCode-上一个会话", 0x7E, .maskAlternate),
-            ("OpenCode-下一个未读会话", 0x7D, [.maskAlternate, .maskShift]),
+            ("OpenCode-上一个会话", 0x7E, [.maskAlternate, .maskSecondaryFn, .maskNumericPad]),
+            ("OpenCode-下一个未读会话", 0x7D, [.maskAlternate, .maskShift, .maskSecondaryFn, .maskNumericPad]),
             ("OpenCode-切换侧边栏", 0x0B, [.maskCommand, .maskShift]),
             ("OpenCode-选择模型", 0x27, .maskCommand),
             ("OpenCode-循环切换模型变体", 0x02, [.maskCommand, .maskShift]),
@@ -162,7 +162,7 @@ final class DefaultMacroTests: XCTestCase {
             XCTAssertEqual(events.map(\.type), [.keyDown, .keyUp], name)
             XCTAssertEqual(events.map { $0.getIntegerValueField(.keyboardEventKeycode) }, [keyCode, keyCode], name)
             XCTAssertEqual(events.first?.flags, flags, name)
-            XCTAssertEqual(events.last?.flags, [], name)
+            XCTAssertEqual(events.last?.flags, flags.intersection([.maskSecondaryFn, .maskNumericPad]), name)
         }
     }
 

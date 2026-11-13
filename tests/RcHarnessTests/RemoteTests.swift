@@ -168,7 +168,7 @@ final class RemoteInputBoundaryTests: XCTestCase {
         mapping[.buttonA, .double] = ButtonMapping(action: .paste)
         mapping[.buttonB] = ButtonMapping(action: .leftCommand)
         var events: [(RemoteAction, Bool)] = []
-        gestures.onOutput = { events.append(($0.action, $1)) }
+        gestures.onOutput = { value, pressed, _ in events.append((value.action, pressed)) }
         gestures.handle(.buttonA, pressed: true, mapping: mapping)
         gestures.handle(.buttonB, pressed: true, mapping: mapping)
         gestures.cancel(.buttonA)

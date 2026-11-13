@@ -360,15 +360,19 @@ struct MappingEditorSheet: View {
                         }
                     } else {
                         if model.selectedInput.supportedTriggers.count > 1 {
-                            Picker("触发方式", selection: $model.selectedTrigger) {
-                                ForEach(model.selectedInput.supportedTriggers) { trigger in Text(trigger.title).tag(trigger) }
+                            MappingEditorField("触发方式") {
+                                Picker("触发方式", selection: $model.selectedTrigger) {
+                                    ForEach(model.selectedInput.supportedTriggers) { trigger in Text(trigger.title).tag(trigger) }
+                                }
+                                .pickerStyle(.segmented)
+                            }
+                        }
+                        MappingEditorField("动作分类") {
+                            Picker("动作分类", selection: $actionFilter) {
+                                ForEach(ActionFilter.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .pickerStyle(.segmented)
                         }
-                        Picker("动作分类", selection: $actionFilter) {
-                            ForEach(ActionFilter.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
                         ActionMappingEditor(value: editedMapping, model: model, filter: actionFilter)
                             .id(model.selectedTrigger)
                     }
@@ -385,7 +389,7 @@ struct MappingEditorSheet: View {
             }
             .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, 16)
         }
-        .frame(width: 560, height: model.selectedInput == .options ? 560 : 420)
+        .frame(width: 560, height: model.selectedInput == .options ? 560 : editedMapping.wrappedValue.action == .macro ? 460 : 420)
         .background(Color(nsColor: .controlBackgroundColor))
         .onExitCommand { model.editorVisible = false }
     }
@@ -522,29 +526,60 @@ private struct MappingConnectors: View {
     }
 }
 
+/// One label column shared by the sheet and its action-specific fields.
+@MainActor
+struct MappingEditorField<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack(spacing: SettingsStyle.Spacing.inline) {
+            Text(title)
+                .frame(width: 52, alignment: .leading)
+                .accessibilityHidden(true)
+            content
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+        }
+        .font(SettingsStyle.Typography.body)
+    }
+}
+
 struct ActionMappingEditor: View {
     @Binding var value: ButtonMapping
     @ObservedObject var model: RemoteDashboardModel
     var filter: ActionFilter
     var parentMacroID: UUID? = nil
     @State private var capturing = false
+    @State private var selectedMacroTagIDs: Set<String> = []
     private var actions: [RemoteAction] {
         let basic: [RemoteAction] = [.enter, .backspace, .rapidDelete, .escape, .arrowUp, .arrowDown, .arrowLeft, .arrowRight, .copy, .paste, .browserBack, .browserForward]
-        let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .screenshot, .mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown] + (parentMacroID == nil ? [.switchToNativeMode, .openHarnessSwitcher, .openPhrases] : [])
+        let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .screenshot, .showAllWindows, .mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown] + (parentMacroID == nil ? [.switchToNativeMode, .switchApplications, .openHarnessSwitcher, .openPhrases] : [])
         let custom: [RemoteAction] = [.recordedShortcut, .openApplication, .phrase, .macro]
+        let filtered: [RemoteAction]
         switch filter {
-        case .basic: return basic + [.disabled]
-        case .system: return system + [.disabled]
-        case .custom: return custom + [.disabled]
-        case .all: return basic + system + custom + [.disabled]
+        case .basic: filtered = basic
+        case .system: filtered = system
+        case .custom: filtered = custom
+        case .all: filtered = custom + basic + system
         }
+        var ordered = [.disabled] + custom + basic + system
+        if !ordered.contains(value.action) { ordered.append(value.action) }
+        return ordered.filter { $0 == .disabled || $0 == value.action || filtered.contains($0) }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
-            Picker("执行动作", selection: Binding(get: { value.action }, set: { value = ButtonMapping(action: $0) })) {
-                if !actions.contains(value.action) { Text(value.action.label).tag(value.action) }
-                ForEach(actions) { action in Text(action.label).tag(action) }
-            }.font(SettingsStyle.Typography.body)
+            MappingEditorField("执行动作") {
+                SettingsSingleSelectionPicker(selection: Binding(get: { value.action }, set: { value = ButtonMapping(action: $0) }),
+                    options: actions.map {
+                        SettingsSelectionOption(value: $0, title: $0.label)
+                    }, accessibilityLabel: "执行动作", identifier: "mapping-action-picker")
+            }
             if value.action == .rapidDelete {
                 Text("按住连续退格，松开即停止。可绑定到长按手势，保留单击的原有动作；双击或组合动作中执行一次退格。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -553,8 +588,12 @@ struct ActionMappingEditor: View {
                 Text("关闭遥控器映射，恢复原生按键。返回映射模式时，请在主面板开启「启用遥控器映射」，或点击菜单栏的模式项。")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            if value.action == .switchApplications {
+                Text("打开 macOS 应用切换器。同一按键每按一次切换一项，按住连续切换；停止操作 2 秒后自动进入，返回或主页取消。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if value.action == .openHarnessSwitcher {
-                Text("展示已启用且正在运行的 Harness。左右选择，确认 OK 切换应用，返回或主页关闭列表。")
+                Text("展示已启用且正在运行的 Harness。同一按键每按一次切换一项，按住连续切换；停止操作 2 秒后自动进入。左右键也可选择，确认 OK 立即进入，返回或主页取消。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if value.action == .openPhrases {
@@ -573,9 +612,12 @@ struct ActionMappingEditor: View {
                 }
             }
             if value.action == .phrase {
-                Picker("常用语", selection: Binding(get: { value.referenceID ?? "" }, set: { value.referenceID = $0 })) {
-                    Text("选择常用语").tag("")
-                    ForEach(model.phrases) { Text($0.title).tag($0.id.uuidString) }
+                MappingEditorField("常用语") {
+                    SettingsSingleSelectionPicker(selection: Binding(get: { value.referenceID ?? "" }, set: { value.referenceID = $0 }),
+                        options: [SettingsSelectionOption(value: "", title: "选择常用语")] + model.phrases.map {
+                            SettingsSelectionOption(value: $0.id.uuidString, title: $0.title)
+                        }, accessibilityLabel: "常用语", identifier: "mapping-phrase-picker",
+                        missingSelectionTitle: "已删除的常用语")
                 }
                 if let referenceID = value.referenceID, !referenceID.isEmpty,
                    !model.phrases.contains(where: { $0.id.uuidString == referenceID }) {
@@ -585,20 +627,8 @@ struct ActionMappingEditor: View {
                 Button("管理常用语") { model.page = .phrases }.buttonStyle(.link).font(.caption)
             }
             if value.action == .macro {
-                Picker("组合动作", selection: Binding(get: { value.referenceID ?? "" }, set: { value.referenceID = $0 })) {
-                    Text("选择组合动作").tag("")
-                    ForEach(model.macros) { macro in
-                        let createsCycle = parentMacroID.map { !model.canNestMacro(macro.id, in: $0) } ?? false
-                        Text(macro.name + (createsCycle ? "（循环引用）" : ""))
-                            .tag(macro.id.uuidString)
-                            .disabled(createsCycle)
-                    }
-                }
-                if let referenceID = value.referenceID, !referenceID.isEmpty,
-                   !model.macros.contains(where: { $0.id.uuidString == referenceID }) {
-                    Text("引用的组合动作已删除，请重新选择。")
-                        .font(.caption).foregroundStyle(.red)
-                }
+                MacroReferencePicker(referenceID: $value.referenceID, tagIDs: $selectedMacroTagIDs,
+                                     model: model, parentMacroID: parentMacroID)
             }
         }
     }

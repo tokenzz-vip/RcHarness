@@ -31,19 +31,41 @@ struct HarnessSwitcherItem: Identifiable, Equatable {
 /// Owns modal input until every consumed press has received its release.
 @MainActor
 final class HarnessSwitcherModel: ObservableObject {
+    static let confirmationDelay: TimeInterval = ApplicationSwitcherController.confirmationDelay
+    static let repeatDelay: TimeInterval = ApplicationSwitcherController.repeatDelay
+    static let repeatInterval: TimeInterval = ApplicationSwitcherController.repeatInterval
+
+    private let schedule: RemoteVoiceSessionController.Scheduler
     @Published private(set) var items: [HarnessSwitcherItem] = []
     @Published private(set) var selectedID: Int32?
     @Published private(set) var isPresented = false
     private var heldInputs: Set<ControllerInput> = []
     private var consumedInputs: Set<ControllerInput> = []
+    private var triggerInput: ControllerInput?
+    private var confirmationWork: DispatchWorkItem?
+    private var repeatWork: DispatchWorkItem?
+    private var generation = 0
     var onConfirm: ((HarnessSwitcherItem) -> Void)?
     var onDismiss: (() -> Void)?
 
-    func present(items: [HarnessSwitcherItem], frontmostProcessID: Int32?) {
+    init(schedule: @escaping RemoteVoiceSessionController.Scheduler = RemoteVoiceSessionController.mainQueue) {
+        self.schedule = schedule
+    }
+
+    func present(items: [HarnessSwitcherItem], frontmostProcessID: Int32?, triggerInput: ControllerInput? = nil) {
+        confirmationWork?.cancel()
+        repeatWork?.cancel()
+        generation += 1
         self.items = items
         selectedID = items.first(where: { $0.id == frontmostProcessID })?.id ?? items.first?.id
+        self.triggerInput = triggerInput
         consumedInputs.formUnion(heldInputs)
         isPresented = true
+        if let triggerInput, heldInputs.contains(triggerInput) {
+            scheduleRepeat(after: Self.repeatDelay)
+        } else if triggerInput != nil {
+            scheduleConfirmation()
+        }
         Log.switcher.notice("Presented items=\(items.count) held_inputs=\(self.heldInputs.count)")
     }
 
@@ -70,6 +92,12 @@ final class HarnessSwitcherModel: ObservableObject {
 
     func dismiss(reason: String = "requested") {
         guard isPresented else { return }
+        confirmationWork?.cancel()
+        repeatWork?.cancel()
+        confirmationWork = nil
+        repeatWork = nil
+        generation += 1
+        triggerInput = nil
         Log.switcher.notice("Dismissed reason=\(reason, privacy: .public)")
         isPresented = false
         onDismiss?()
@@ -87,20 +115,51 @@ final class HarnessSwitcherModel: ObservableObject {
         let wasHeld = heldInputs.contains(input)
         if pressed { heldInputs.insert(input) } else { heldInputs.remove(input) }
         if consumedInputs.contains(input) {
-            if !pressed { consumedInputs.remove(input) }
+            if !pressed {
+                consumedInputs.remove(input)
+                if input == triggerInput { repeatWork?.cancel(); scheduleConfirmation() }
+                else if isPresented { scheduleConfirmation() }
+            }
             return true
         }
         guard isPresented else { return false }
         guard pressed else { return true }
         consumedInputs.insert(input)
         guard !wasHeld else { return true }
-        switch input {
-        case .dpadLeft: move(-1)
-        case .dpadRight: move(1)
-        case .buttonA: confirm()
-        case .buttonB, .home, .menu: dismiss(reason: "remote-\(input.rawValue)")
-        default: break
+        if input == triggerInput {
+            move(1)
+            scheduleRepeat(after: Self.repeatDelay)
+        } else {
+            switch input {
+            case .dpadLeft: move(-1)
+            case .dpadRight: move(1)
+            case .buttonA: confirm()
+            case .buttonB, .home, .menu: dismiss(reason: "remote-\(input.rawValue)")
+            default: break
+            }
         }
         return true
+    }
+
+    private func scheduleConfirmation() {
+        confirmationWork?.cancel()
+        guard isPresented, triggerInput != nil else { return }
+        let generation = generation
+        confirmationWork = schedule(Self.confirmationDelay) { [weak self] in
+            guard let self, self.isPresented, self.generation == generation else { return }
+            self.confirm()
+        }
+    }
+
+    private func scheduleRepeat(after delay: TimeInterval) {
+        repeatWork?.cancel()
+        guard isPresented, let triggerInput, heldInputs.contains(triggerInput) else { return }
+        let generation = generation
+        repeatWork = schedule(delay) { [weak self] in
+            guard let self, self.isPresented, self.generation == generation,
+                  let triggerInput = self.triggerInput, self.heldInputs.contains(triggerInput) else { return }
+            self.move(1)
+            self.scheduleRepeat(after: Self.repeatInterval)
+        }
     }
 }

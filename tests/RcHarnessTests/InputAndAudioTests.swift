@@ -25,7 +25,7 @@ final class InputAndAudioTests: XCTestCase {
         var mode: ControllerOperationMode = .mapping
         var events: [RemoteAction] = []
         let mapping = RemoteMapping.defaults
-        gestures.onOutput = { value, down in
+        gestures.onOutput = { value, down, _ in
             guard down else { return }
             events.append(value.action)
             if value.action == .switchToNativeMode {
@@ -76,7 +76,7 @@ final class InputAndAudioTests: XCTestCase {
         mapping[.buttonA, .double] = ButtonMapping(action: .copy)
         mapping[.buttonA, .long] = ButtonMapping(action: .paste)
         var events: [RemoteAction] = []
-        gestures.onOutput = { if $1 { events.append($0.action) } }
+        gestures.onOutput = { value, pressed, _ in if pressed { events.append(value.action) } }
         gestures.handle(.buttonA, pressed: true, mapping: mapping)
         gestures.handle(.buttonA, pressed: false, mapping: mapping)
         gestures.handle(.buttonA, pressed: true, mapping: mapping)
@@ -98,6 +98,61 @@ final class InputAndAudioTests: XCTestCase {
         XCTAssertEqual(clicks.map(\.location), [location, location])
         XCTAssertEqual(clicks.map(\.type), [.leftMouseDown, .leftMouseUp])
         XCTAssertEqual(movements, [CGPoint(x: -900, y: 388), CGPoint(x: -888, y: 400)])
+    }
+
+    func testShowAllWindowsPreservesArrowFlagsRequiredBySystemShortcutMatching() throws {
+        var events: [CGEvent] = []
+        let sender = SystemEventSender(postEvent: { events.append($0) })
+        sender.send(ButtonMapping(action: .showAllWindows), pressed: true)
+
+        let down = try XCTUnwrap(events.first)
+        let up = try XCTUnwrap(events.last)
+        let arrowFlags: CGEventFlags = [.maskSecondaryFn, .maskNumericPad]
+        XCTAssertTrue(down.flags.contains(arrowFlags.union(.maskControl)),
+                      "Mission Control must receive Control plus the native arrow-key flags")
+        XCTAssertTrue(up.flags.contains(arrowFlags), "The release must remain an arrow-key event")
+        XCTAssertFalse(up.flags.contains(.maskControl))
+    }
+
+    func testShowAllWindowsTapsControlUpWithoutHoldingModifiersOrRetriggeringOnRelease() {
+        var events: [CGEvent] = []
+        let sender = SystemEventSender(postEvent: { events.append($0) })
+        let mapping = ButtonMapping(action: .showAllWindows)
+
+        sender.send(mapping, pressed: true)
+        XCTAssertEqual(events.map(\.type), [.keyDown, .keyUp])
+        XCTAssertEqual(events.map { $0.getIntegerValueField(.keyboardEventKeycode) },
+                       [Int64(VirtualKey.upArrow), Int64(VirtualKey.upArrow)])
+        let arrowFlags: CGEventFlags = [.maskSecondaryFn, .maskNumericPad]
+        XCTAssertEqual(events.map(\.flags), [arrowFlags.union(.maskControl), arrowFlags])
+
+        sender.send(mapping, pressed: false)
+        XCTAssertEqual(events.count, 2)
+
+        sender.send(ButtonMapping(action: .arrowUp), pressed: true)
+        sender.send(ButtonMapping(action: .arrowUp), pressed: false)
+        XCTAssertEqual(events.map(\.type), [.keyDown, .keyUp, .keyDown, .keyUp])
+        XCTAssertTrue(events.suffix(2).allSatisfy { $0.flags == arrowFlags })
+        sender.send(ButtonMapping(action: .enter), pressed: true)
+        sender.send(ButtonMapping(action: .enter), pressed: false)
+        XCTAssertTrue(events.suffix(2).allSatisfy { $0.flags.isEmpty })
+    }
+
+    func testRecordedArrowShortcutsKeepNativeFlagsWithoutLeakingThemToOtherKeys() {
+        for code in [VirtualKey.upArrow, VirtualKey.downArrow, VirtualKey.leftArrow, VirtualKey.rightArrow] {
+            var events: [CGEvent] = []
+            let sender = SystemEventSender(postEvent: { events.append($0) })
+            let mapping = ButtonMapping(action: .recordedShortcut,
+                shortcut: RecordedShortcut(keyCode: code, modifiers: CGEventFlags.maskControl.rawValue, label: "Control + Arrow"))
+            sender.send(mapping, pressed: true)
+            sender.send(mapping, pressed: false)
+            let arrowFlags: CGEventFlags = [.maskSecondaryFn, .maskNumericPad]
+            XCTAssertEqual(events.map(\.type), [.keyDown, .keyUp])
+            XCTAssertEqual(events.map(\.flags), [arrowFlags.union(.maskControl), arrowFlags])
+            sender.send(ButtonMapping(action: .enter), pressed: true)
+            sender.send(ButtonMapping(action: .enter), pressed: false)
+            XCTAssertTrue(events.suffix(2).allSatisfy { $0.flags.isEmpty })
+        }
     }
 
     func testLoopbackCandidatesRejectPhysicalDuplexAndOneWayVirtualDevices() {

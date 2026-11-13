@@ -724,10 +724,15 @@ final class RemoteDashboardModel: ObservableObject {
     }
 
     @discardableResult
-    func addMacro() -> UUID {
-        let macro = SavedMacro(name: SavedMacro.uniqueName("新组合动作", existingNames: macros.map(\.name)))
+    func addMacro(tagIDs: Set<String> = [MacroTag.general.id]) -> UUID {
+        let macro = SavedMacro(name: SavedMacro.uniqueName("新组合动作", existingNames: macros.map(\.name)), tagIDs: tagIDs)
         macros.append(macro)
         return macro.id
+    }
+
+    func updateMacroTags(_ tagIDs: Set<String>, for id: UUID) {
+        guard let index = macros.firstIndex(where: { $0.id == id }), macros[index].tagIDs != tagIDs else { return }
+        macros[index].tagIDs = tagIDs
     }
 
     func macroNameError(_ name: String, excluding id: UUID) -> String? {

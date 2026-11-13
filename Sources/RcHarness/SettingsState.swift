@@ -261,6 +261,32 @@ struct SavedMacro: Codable, Identifiable, Equatable {
     var id = UUID()
     var name: String
     var steps: [MacroStep] = [MacroStep()]
+    var tagIDs: Set<String> = [MacroTag.general.id]
+
+    func matches(tagID: String?) -> Bool {
+        tagID.map { tagIDs.contains($0) } ?? true
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, steps, tagIDs }
+
+    init(id: UUID = UUID(), name: String, steps: [MacroStep] = [MacroStep()],
+         tagIDs: Set<String> = [MacroTag.general.id]) {
+        self.id = id
+        self.name = name
+        self.steps = steps
+        self.tagIDs = tagIDs
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        steps = try values.decode([MacroStep].self, forKey: .steps)
+        // Only older records without this field receive labels. Explicit edits,
+        // including clearing all labels, survive subsequent loads and imports.
+        tagIDs = try values.decodeIfPresent(Set<String>.self, forKey: .tagIDs)
+            ?? DefaultMacros.legacyTagIDs(for: id)
+    }
 
     static func uniqueName(_ proposedName: String, existingNames: [String]) -> String {
         RcHarness.uniqueName(proposedName, existingNames: existingNames, fallback: "新组合动作")
