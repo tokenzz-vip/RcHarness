@@ -3,6 +3,13 @@ import CoreGraphics
 import XCTest
 @testable import RcHarness
 
+private final class UnsupportedDesktopController: DesktopController {
+    let isSupported = false
+    private(set) var toggleCount = 0
+
+    func toggle() { toggleCount += 1 }
+}
+
 @MainActor
 final class InputAndAudioTests: XCTestCase {
     func testInstanceLockExcludesAnotherProcessAndReleasesOnExit() throws {
@@ -153,6 +160,34 @@ final class InputAndAudioTests: XCTestCase {
             sender.send(ButtonMapping(action: .enter), pressed: false)
             XCTAssertTrue(events.suffix(2).allSatisfy { $0.flags.isEmpty })
         }
+    }
+
+    func testShowDesktopUsesDockNotificationAndDoesNotRetriggerOnRelease() {
+        var events: [CGEvent] = []
+        var notifications: [String] = []
+        let desktop = SystemDesktopController(notificationSender: { notification in
+            notifications.append(notification as String)
+        })
+        let sender = SystemEventSender(postEvent: { events.append($0) }, desktopController: desktop)
+        let mapping = ButtonMapping(action: .showDesktop)
+
+        sender.send(mapping, pressed: true)
+        sender.send(mapping, pressed: false)
+        sender.send(mapping, pressed: true)
+        sender.send(mapping, pressed: false)
+
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertEqual(notifications, ["com.apple.showdesktop.awake", "com.apple.showdesktop.awake"])
+    }
+
+    func testUnsupportedShowDesktopDoesNotSendNotification() {
+        let desktop = UnsupportedDesktopController()
+        var events: [CGEvent] = []
+        let sender = SystemEventSender(postEvent: { events.append($0) }, desktopController: desktop)
+        sender.send(ButtonMapping(action: .showDesktop), pressed: true)
+        sender.send(ButtonMapping(action: .showDesktop), pressed: false)
+        XCTAssertTrue(events.isEmpty)
+        XCTAssertEqual(desktop.toggleCount, 0)
     }
 
     func testLoopbackCandidatesRejectPhysicalDuplexAndOneWayVirtualDevices() {

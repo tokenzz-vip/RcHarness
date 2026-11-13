@@ -226,6 +226,7 @@ private struct MappingCanvas: View {
         switch mapping.action {
         case .openHarnessSwitcher: "Harness 列表"
         case .screenshot: "区域截图 ⌘⇧4"
+        case .showDesktop: "显示桌面"
         case .switchToNativeMode: "原生模式"
         case .macro:
             if let macro = model.macros.first(where: { $0.id.uuidString == mapping.referenceID }) {
@@ -559,7 +560,10 @@ struct ActionMappingEditor: View {
     @State private var selectedMacroTagIDs: Set<String> = []
     private var actions: [RemoteAction] {
         let basic: [RemoteAction] = [.enter, .backspace, .rapidDelete, .escape, .arrowUp, .arrowDown, .arrowLeft, .arrowRight, .copy, .paste, .browserBack, .browserForward]
-        let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .screenshot, .showAllWindows, .mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown] + (parentMacroID == nil ? [.switchToNativeMode, .switchApplications, .openHarnessSwitcher, .openPhrases] : [])
+        let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .screenshot, .showAllWindows]
+            + (SystemDesktopController.shared.isSupported ? [.showDesktop] : [])
+            + [.mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown]
+            + (parentMacroID == nil ? [.switchToNativeMode, .switchApplications, .openHarnessSwitcher, .openPhrases] : [])
         let custom: [RemoteAction] = [.recordedShortcut, .openApplication, .phrase, .macro]
         let filtered: [RemoteAction]
         switch filter {
@@ -569,9 +573,13 @@ struct ActionMappingEditor: View {
         case .all: filtered = custom + basic + system
         }
         var ordered = [.disabled] + custom + basic + system
-        if !ordered.contains(value.action) { ordered.append(value.action) }
+        let canShowDesktop = SystemDesktopController.shared.isSupported
+        if !ordered.contains(value.action), value.action != .showDesktop || canShowDesktop {
+            ordered.append(value.action)
+        }
         return ordered.filter { $0 == .disabled || $0 == value.action || filtered.contains($0) }
     }
+
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
             MappingEditorField("执行动作") {
@@ -586,6 +594,10 @@ struct ActionMappingEditor: View {
             }
             if value.action == .switchToNativeMode {
                 Text("关闭遥控器映射，恢复原生按键。返回映射模式时，请在主面板开启「启用遥控器映射」，或点击菜单栏的模式项。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if value.action == .showDesktop && SystemDesktopController.shared.isSupported {
+                Text("通过 Dock 系统通知在显示桌面和恢复窗口之间切换。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if value.action == .switchApplications {

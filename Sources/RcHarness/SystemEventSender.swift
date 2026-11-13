@@ -60,6 +60,7 @@ final class SystemEventSender {
     private let postEvent: (CGEvent) -> Void
     private let movePointer: (CGPoint) -> Void
     private let openApplication: (URL) -> Void
+    private let desktopController: any DesktopController
     private var heldKeys: [HeldKey: Int] = [:]
     private var keyUsesFunctionSource: [CGKeyCode: Bool] = [:]
     private var heldMouseButtons: [UInt32: Int] = [:]
@@ -73,12 +74,14 @@ final class SystemEventSender {
         cursorLocation: @escaping () -> CGPoint = { CGEvent(source: nil)?.location ?? .zero },
         postEvent: @escaping (CGEvent) -> Void = { $0.post(tap: .cghidEventTap) },
         movePointer: @escaping (CGPoint) -> Void = { CGWarpMouseCursorPosition($0) },
-        openApplication: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) }
+        openApplication: @escaping (URL) -> Void = { NSWorkspace.shared.open($0) },
+        desktopController: any DesktopController = SystemDesktopController.shared
     ) {
         self.cursorLocation = cursorLocation
         self.postEvent = postEvent
         self.movePointer = movePointer
         self.openApplication = openApplication
+        self.desktopController = desktopController
     }
 
     func send(_ mapping: ButtonMapping, pressed: Bool) {
@@ -112,6 +115,9 @@ final class SystemEventSender {
             guard pressed else { return }
             shortcutEvent(RecordedShortcut(keyCode: VirtualKey.upArrow,
                 modifiers: CGEventFlags.maskControl.rawValue, label: "Control + ↑"))
+        case .showDesktop:
+            guard pressed, desktopController.isSupported else { return }
+            desktopController.toggle()
         case .mouseLeft: mouse(.left, pressed: pressed)
         case .mouseRight: mouse(.right, pressed: pressed)
         case .pointerUp: move(0, -12, pressed: pressed)
@@ -257,7 +263,8 @@ final class SystemEventSender {
         }
     }
 
-    private func heldKey(_ code: CGKeyCode, flags: CGEventFlags, pressed: Bool, source: CGEventSource? = nil) {
+    private func heldKey(_ code: CGKeyCode, flags: CGEventFlags, pressed: Bool,
+                         source: CGEventSource? = nil) {
         let identity = HeldKey(keyCode: code, flags: flags.rawValue, usesFunctionSource: source != nil)
         if pressed {
             let count = heldKeys[identity, default: 0]
