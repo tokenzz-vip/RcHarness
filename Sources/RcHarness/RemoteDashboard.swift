@@ -213,7 +213,7 @@ final class RemoteDashboardModel: ObservableObject {
         let remoteProfile = self.availableRemoteProfiles.first { $0.id == defaults.string(forKey: SettingsKeys.selectedRemoteProfileID) } ?? remoteProfile
         self.remoteProfile = remoteProfile
         self.mapping = mapping
-        globalButtons = GlobalButtonSettings()
+        globalButtons = .defaults(for: remoteProfile)
         // Configurations saved before profiles owned the default mapping kept it separately.
         let legacyDefaultMapping = SettingsStorage.load(RemoteMapping.self, SettingsKeys.Stored.legacyBaseMapping, defaults: defaults) ?? mapping
         profiles = SettingsStorage.load([SavedKeyProfile].self, SettingsKeys.Stored.profiles, defaults: defaults) ?? []
@@ -249,7 +249,8 @@ final class RemoteDashboardModel: ObservableObject {
                 restoreRemoteKeyConfiguration(remoteConfiguration)
             }
             normalizeProfiles(migrateLegacy: remoteKeyConfigurations.isEmpty && legacyBindings && hasSavedConfiguration,
-                              defaultMapping: remoteKeyConfigurations.isEmpty ? legacyDefaultMapping : .defaults)
+                              defaultMapping: remoteKeyConfigurations.isEmpty && hasLegacyGlobalSettings
+                                  ? legacyDefaultMapping : .defaults(for: remoteProfile, macros: macros))
             if let harness = harnesses.first(where: { $0.id == selectedHarnessID && $0.isEnabled }),
                let profile = profiles.first(where: { $0.id == harness.profileID }) {
                 selectedProfileID = profile.id
@@ -261,10 +262,10 @@ final class RemoteDashboardModel: ObservableObject {
                 self.mapping = profile.mapping
             }
             globalButtons = remoteConfiguration?.globalButtons
-                ?? (!remoteKeyConfigurations.isEmpty ? GlobalButtonSettings() : SettingsStorage.load(GlobalButtonSettings.self, SettingsKeys.Stored.globalButtons, defaults: defaults))
+                ?? (!remoteKeyConfigurations.isEmpty ? .defaults(for: remoteProfile) : SettingsStorage.load(GlobalButtonSettings.self, SettingsKeys.Stored.globalButtons, defaults: defaults))
                 ?? (hasLegacyGlobalSettings
                     ? .migrating(self.mapping, voiceFnTap: defaults.bool(forKey: SettingsKeys.voiceFnTap))
-                    : GlobalButtonSettings())
+                    : .defaults(for: remoteProfile))
             globalButtons = globalButtons.normalized(for: remoteProfile)
             isRestoringRemoteConfiguration = false
             settingsWrites.save(globalButtons, SettingsKeys.Stored.globalButtons)
@@ -321,7 +322,7 @@ final class RemoteDashboardModel: ObservableObject {
             isRestoringRemoteConfiguration = true
             remoteProfile = profile
             restoreRemoteKeyConfiguration(remoteKeyConfigurations[profile.id])
-            normalizeProfiles(migrateLegacy: false, defaultMapping: .defaults)
+            normalizeProfiles(migrateLegacy: false, defaultMapping: .defaults(for: profile, macros: macros))
             restoreKeySelection()
             globalButtons = globalButtons.normalized(for: profile)
             isRestoringRemoteConfiguration = false
@@ -378,12 +379,44 @@ final class RemoteDashboardModel: ObservableObject {
     var effectiveMapping: RemoteMapping { globalButtons.applying(to: mapping, profile: remoteProfile) }
 
     func isGlobalInput(_ input: ControllerInput) -> Bool {
-        input == globalButtons.input
+        globalButtons.buttons.contains { $0.input == input }
     }
 
     func setGlobalInput(_ input: ControllerInput) {
-        guard input != .options, remoteProfile.inputs.contains(input) else { return }
-        globalButtons.input = input
+        setGlobalInput(input, at: 0)
+    }
+
+    func globalInputChoices(at index: Int) -> [ControllerInput] {
+        let assignedElsewhere = Set(globalButtons.buttons.enumerated().compactMap { offset, button in
+            offset == index ? nil : button.input
+        })
+        return remoteProfile.inputs.filter { $0 != .options && !assignedElsewhere.contains($0) }
+    }
+
+    func setGlobalInput(_ input: ControllerInput?, at index: Int) {
+        guard globalButtons.buttons.indices.contains(index) else { return }
+        guard index > 0 || input != nil else { return }
+        if let input {
+            guard input != .options, remoteProfile.inputs.contains(input),
+                  !globalButtons.buttons.enumerated().contains(where: { $0.offset != index && $0.element.input == input }) else { return }
+        }
+        var settings = globalButtons
+        settings.buttons[index].input = input
+        globalButtons = settings.normalized(for: remoteProfile)
+    }
+
+    func addGlobalButton() {
+        var settings = globalButtons
+        settings.buttons.append(GlobalButtonEntry())
+        globalButtons = settings
+    }
+
+    func removeGlobalButton(at index: Int) {
+        guard index >= GlobalButtonSettings.requiredButtonCount,
+              globalButtons.buttons.indices.contains(index) else { return }
+        var settings = globalButtons
+        settings.buttons.remove(at: index)
+        globalButtons = settings.normalized(for: remoteProfile)
     }
 
     func setGlobalButtons(_ settings: GlobalButtonSettings) {
@@ -397,11 +430,11 @@ final class RemoteDashboardModel: ObservableObject {
         if input == .options {
             guard trigger == .single, value.shortcutForVoice != nil else { return }
             globalButtons.voice = value
-        } else if input == globalButtons.input {
+        } else if let index = globalButtons.buttons.firstIndex(where: { $0.input == input }) {
             switch trigger {
-            case .single: globalButtons.single = value
-            case .double: globalButtons.double = value
-            case .long: globalButtons.long = value
+            case .single: globalButtons.buttons[index].single = value
+            case .double: globalButtons.buttons[index].double = value
+            case .long: globalButtons.buttons[index].long = value
             }
         } else {
             mapping[input, trigger] = value
@@ -423,9 +456,9 @@ final class RemoteDashboardModel: ObservableObject {
            profile.id != SavedKeyProfile.defaultID,
            let harness = profile.builtInHarness
                 ?? harnesses.first(where: { $0.id == "codex" && $0.profileID == profile.id }) {
-            mapping = harness.defaultMapping(macros: macros)
+            mapping = harness.defaultMapping(macros: macros, remoteProfile: remoteProfile)
         } else {
-            mapping = .defaults
+            mapping = .defaults(for: remoteProfile, macros: macros)
         }
         persistMapping()
         postNotice("已恢复当前按键方案的默认映射", level: .success)
@@ -604,7 +637,7 @@ final class RemoteDashboardModel: ObservableObject {
         settingsWrites.batch {
             let normalized = NormalizedKeyProfiles(profiles: profiles, harnesses: harnesses,
                 selectedHarnessID: selectedHarnessID, macros: macros,
-                migrateLegacy: migrateLegacy, defaultMapping: defaultMapping)
+                migrateLegacy: migrateLegacy, defaultMapping: defaultMapping, remoteProfile: remoteProfile)
             profiles = normalized.profiles
             harnesses = normalized.harnesses
             selectedHarnessID = normalized.selectedHarnessID
@@ -647,7 +680,7 @@ final class RemoteDashboardModel: ObservableObject {
         profiles = configuration?.profiles ?? []
         selectedProfileID = configuration?.selectedProfileID
         selectedHarnessID = configuration?.selectedHarnessID
-        globalButtons = configuration?.globalButtons ?? GlobalButtonSettings()
+        globalButtons = configuration?.globalButtons ?? .defaults(for: remoteProfile)
         harnesses = harnesses.map { harness in
             // Configuration IDs have already been migrated. Migrate the app
             // metadata before looking up bindings and initialization intent.
@@ -687,7 +720,7 @@ final class RemoteDashboardModel: ObservableObject {
         phrases = backup.phrases
         phraseAssignments = backup.phraseAssignments ?? PhraseAssignments()
         harnesses = backup.harnesses ?? HarnessConfiguration.defaults
-        globalButtons = backup.globalButtons ?? GlobalButtonSettings()
+        globalButtons = backup.globalButtons ?? .defaults(for: remoteProfile)
         let current = remoteKeyConfigurations[remoteProfile.id]
         selectedProfileID = current?.selectedProfileID ?? SavedKeyProfile.defaultID
         selectedHarnessID = current?.selectedHarnessID

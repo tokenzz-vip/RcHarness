@@ -136,9 +136,10 @@ final class XiaomiRC001Tests: XCTestCase {
         let proProfiles = model.profiles
 
         model.selectRemoteProfile(RemoteProfiles.xiaomiRC001.id)
-        XCTAssertEqual(model.mapping[.buttonA, .double].action, .disabled)
+        XCTAssertEqual(model.mapping[.buttonA, .double].action, .macro)
         XCTAssertEqual(model.globalButtons.input, .power)
         model.update(ButtonMapping(action: .paste), for: .buttonA, trigger: .double)
+        model.setGlobalInput(nil, at: 1)
         model.setGlobalInput(.home)
         let rc001ProfileID = try XCTUnwrap(model.selectedProfileID)
         XCTAssertTrue(model.bindProfile(rc001ProfileID, to: "codex"))

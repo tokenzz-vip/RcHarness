@@ -440,7 +440,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         let phraseConsumed = phrasePicker.model.handle(input, pressed: pressed)
         let switcherConsumed = harnessSwitcher.model.handle(input, pressed: pressed)
         let consumed = phraseConsumed || switcherConsumed
-        if input == dashboardModel?.globalButtons.input {
+        if dashboardModel?.isGlobalInput(input) == true {
             Log.switcher.notice("Global input=\(input.rawValue, privacy: .public) down=\(pressed) consumed=\(consumed) mapping_mode=\(self.mode == .mapping) single=\(self.mapping[input, .single].action.rawValue, privacy: .public) double=\(self.mapping[input, .double].action.rawValue, privacy: .public) long=\(self.mapping[input, .long].action.rawValue, privacy: .public)")
         }
         if consumed { return }
@@ -730,6 +730,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         }
         seedStatistics(historyDays: 400)
         let pages = SettingsPage.allCases
+        let previewHarnessID: String = {
+            guard let flag = CommandLine.arguments.firstIndex(of: "--harness"),
+                  CommandLine.arguments.count > flag + 1,
+                  HarnessConfiguration.defaults.contains(where: { $0.id == CommandLine.arguments[flag + 1] }) else { return "codex" }
+            return CommandLine.arguments[flag + 1]
+        }()
         func render(_ index: Int) {
             guard index <= pages.count + 19 else { NSApp.terminate(nil); return }
             let applicationSwitcherPreview = index == pages.count + 19
@@ -842,7 +848,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 windowController.window?.makeKeyAndOrderFront(nil)
             } else {
                 if codexPreview {
-                    dashboardModel.activateHarness("codex")
+                    dashboardModel.activateHarness(previewHarnessID)
                     dashboardModel.page = .mapping
                 } else {
                     dashboardModel.page = pages[index]
@@ -850,7 +856,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 windowController.window?.makeKeyAndOrderFront(nil)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
-                let filename = applicationSwitcherPreview ? "application-switcher-editor" : macroEditorPreview ? "macro-editor" : statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : codexPreview ? "mapping-codex" : pages[index].rawValue
+                let filename = applicationSwitcherPreview ? "application-switcher-editor" : macroEditorPreview ? "macro-editor" : statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : codexPreview ? "mapping-" + previewHarnessID : pages[index].rawValue
                 let voiceEditor = voiceEditorPreview || rapidDeletePreview || macroEditorPreview || applicationSwitcherPreview ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel, actionFilter: .constant(applicationSwitcherPreview ? .system : .all))) : nil
                 voiceEditor?.frame = NSRect(x: 0, y: 0, width: 560, height: macroEditorPreview ? 460 : 560)
                 let isNewProfile = index == pages.count + 3

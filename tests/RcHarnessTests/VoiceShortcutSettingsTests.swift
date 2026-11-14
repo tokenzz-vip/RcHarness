@@ -58,7 +58,7 @@ final class VoiceShortcutSettingsTests: XCTestCase {
     func testGoogleTapImportAndSwitchBackToHoldKeepBothShortcutsAndXiaomiDisabled() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         model.selectRemoteProfile(RemoteProfiles.googleG9N9N.id)
-        XCTAssertEqual(model.voiceMode, .hold, "Existing Google configurations default to hold")
+        XCTAssertEqual(model.voiceMode, .tap, "New Google configurations use the screenshot’s tap shortcut")
         let hold = VoiceShortcutChoice.singles[2].shortcut
         let tap = VoiceShortcutChoice.pairs[6].shortcut
         model.voiceHoldShortcut = hold

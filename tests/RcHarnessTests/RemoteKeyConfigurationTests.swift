@@ -67,7 +67,7 @@ final class RemoteKeyConfigurationTests: XCTestCase {
         model.update(ButtonMapping(action: .copy), for: .buttonA, trigger: .double)
         model.bindProfile(nil, to: "codex")
         model.selectRemoteProfile(RemoteProfiles.googleG9N9N.id)
-        XCTAssertEqual(model.mapping[.buttonA, .double].action, .disabled)
+        XCTAssertEqual(model.mapping[.buttonA, .double].action, .macro)
         XCTAssertNotNil(model.harnesses.first { $0.id == "codex" }?.profileID)
         model.update(ButtonMapping(action: .paste), for: .buttonA, trigger: .double)
         model.selectRemoteProfile(RemoteProfiles.xiaomiRC003.id)

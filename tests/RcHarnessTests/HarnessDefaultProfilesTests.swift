@@ -24,14 +24,14 @@ final class HarnessDefaultProfilesTests: XCTestCase {
             XCTAssertEqual(model.profiles.count, HarnessConfiguration.defaults.count + 1)
             XCTAssertEqual(model.selectedProfileID, SavedKeyProfile.defaultID)
             XCTAssertNil(model.selectedHarnessID)
-            XCTAssertEqual(model.defaultMapping, .defaults)
+            XCTAssertEqual(model.defaultMapping, .defaults(for: remote, macros: model.macros))
             for builtIn in HarnessConfiguration.defaults {
                 let harness = try XCTUnwrap(model.harnesses.first { $0.id == builtIn.id })
                 let profile = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
                 XCTAssertEqual(profile.name, builtIn.name + " 按键方案")
                 XCTAssertTrue(harness.didInitializeDefaultProfile)
                 XCTAssertTrue(generatedIDs.insert(profile.id).inserted)
-                XCTAssertEqual(profile.mapping, builtIn.id == "codex" ? .codexDefaults(macros: model.macros) : .defaults)
+                XCTAssertEqual(profile.mapping, builtIn.defaultMapping(macros: model.macros, remoteProfile: remote))
                 model.activateHarness(harness.id)
                 XCTAssertEqual(model.selectedProfileID, profile.id)
                 XCTAssertEqual(model.mapping, profile.mapping)
@@ -57,7 +57,7 @@ final class HarnessDefaultProfilesTests: XCTestCase {
             let workBuddy = SavedKeyProfile(name: "我的 WorkBuddy", mapping: customMapping)
             let claude = SavedKeyProfile(name: "已有 Claude", mapping: customMapping)
             let conflict = SavedKeyProfile(name: "Cursor 按键方案", mapping: customMapping)
-            var globals = GlobalButtonSettings()
+            var globals = GlobalButtonSettings().normalized(for: remote)
             globals.double = ButtonMapping(action: .paste)
             oldConfigurations[remote.id] = RemoteKeyConfiguration(
                 profiles: [SavedKeyProfile(id: SavedKeyProfile.defaultID, name: "默认方案", mapping: customMapping),
@@ -91,7 +91,7 @@ final class HarnessDefaultProfilesTests: XCTestCase {
                 let harness = try XCTUnwrap(model.harnesses.first { $0.id == id })
                 let profile = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
                 XCTAssertEqual(profile.name, name)
-                XCTAssertEqual(profile.mapping, .defaults)
+                XCTAssertEqual(profile.mapping, harness.defaultMapping(macros: model.macros, remoteProfile: remote))
                 model.activateProfile(profile.id)
                 model.update(ButtonMapping(action: .paste), for: .buttonA, trigger: .single)
             }

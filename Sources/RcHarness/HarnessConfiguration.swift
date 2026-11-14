@@ -20,8 +20,8 @@ struct HarnessConfiguration: Equatable, Identifiable {
         Self.defaults.first { $0.id == id }.map { $0.name + " 按键方案" }
     }
 
-    func defaultMapping(macros: [SavedMacro]) -> RemoteMapping {
-        id == "codex" ? .codexDefaults(macros: macros) : .defaults
+    func defaultMapping(macros: [SavedMacro], remoteProfile: RemoteProfile = RemoteProfiles.xiaomiRC003) -> RemoteMapping {
+        RemoteMapping.harnessDefaults(id, for: remoteProfile, macros: macros)
     }
 
     static func builtIn(matchingProfileName profileName: String) -> Self? {

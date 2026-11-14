@@ -70,7 +70,7 @@ Chromecast 遥控器另提供点按语音模式，固件兼容性需实机确认
 
 虚拟麦克风组件随应用提供，首次安装需要管理员授权。RcHarness 负责传递音频，语音识别由目标语音应用处理。
 
-默认电源键操作：**单击**打开运行中的应用列表，**双击**区域截图，**长按**切换至原生模式。可从主面板或菜单栏恢复映射，也可自行调整全局按键。
+默认电源键操作：**单击**打开运行中的应用列表，**双击**未设置，**长按**切换至原生模式。全局按键默认三项，依次为电源键、主页键、小米 TV 键／Chromecast 输入源键；这三项不可删除，第一项必选，后两项可留空。主页键默认单击显示桌面、双击 Escape、长按未设置；第三项默认单击切换应用、双击查看所有窗口、长按显示桌面。可从主面板或菜单栏恢复映射，也可自行调整全局按键。
 
 ## 常见问题
 
@@ -100,6 +100,8 @@ open .build/RcHarness.app
 ```bash
 .build/RcHarness.app/Contents/MacOS/RcHarness --render-settings /tmp/rcharness-pages
 .build/RcHarness.app/Contents/MacOS/RcHarness --render-settings /tmp/rcharness-pages-dark --dark --narrow
+# 按当前型号导出指定 Harness 的映射（默认 codex）
+.build/RcHarness.app/Contents/MacOS/RcHarness --render-settings /tmp/rcharness-claude --remote-profile xiaomi-rc001 --harness claude
 ```
 
 详细说明：[界面与运行时行为](docs/behavior.md) · [小米 RC001-MS 适配](docs/xiaomi-rc001.md) · [Google G9N9N 适配](docs/google-g9n9n.md)

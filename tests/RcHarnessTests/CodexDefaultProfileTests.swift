@@ -15,44 +15,50 @@ final class CodexDefaultProfileTests: XCTestCase {
         defaults.removePersistentDomain(forName: suiteName)
     }
 
-    func testFreshCodexProfileMatchesRequestedButtonsAndExecutableMacros() throws {
+    func testFreshXiaomiDefaultAndCodexProfilesMatchScreenshot() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
-        let harness = try XCTUnwrap(model.harnesses.first { $0.id == "codex" })
-        let profile = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
-        XCTAssertEqual(profile.name, "Codex 按键方案")
-        XCTAssertTrue(harness.didInitializeDefaultProfile)
-        XCTAssertEqual(model.selectedProfileID, SavedKeyProfile.defaultID)
-        XCTAssertEqual(model.defaultMapping, .defaults)
-        model.activateHarness(harness.id)
-        let singleActions: [ControllerInput: RemoteAction] = [
-            .dpadUp: .arrowUp, .dpadRight: .arrowRight, .dpadDown: .arrowDown,
-            .dpadLeft: .arrowLeft, .buttonA: .enter, .buttonB: .backspace,
-            .home: .escape, .menu: .copy, .rightShoulder: .volumeUp,
-            .leftShoulder: .volumeDown, .buttonY: .paste,
-        ]
-        for (input, action) in singleActions {
-            XCTAssertEqual(model.effectiveMapping[input].action, action, input.rawValue)
-            XCTAssertEqual(model.effectiveMapping[input, .long].action, .disabled)
+        for remote in [RemoteProfiles.xiaomiRC001, RemoteProfiles.xiaomiRC003] {
+            model.selectRemoteProfile(remote.id)
+            let harness = try XCTUnwrap(model.harnesses.first { $0.id == "codex" })
+            let profile = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
+            XCTAssertEqual(profile.name, "Codex 按键方案")
+            XCTAssertTrue(harness.didInitializeDefaultProfile)
+            XCTAssertEqual(model.selectedProfileID, SavedKeyProfile.defaultID)
+            XCTAssertEqual(model.defaultMapping, profile.mapping)
+            for id in [SavedKeyProfile.defaultID, profile.id] {
+                model.activateProfile(id)
+                let actions: [(ControllerInput, RemoteAction, RemoteAction, RemoteAction)] = [
+                    (.dpadUp, .arrowUp, .macro, .disabled), (.dpadRight, .arrowRight, .macro, .disabled),
+                    (.dpadDown, .arrowDown, .macro, .disabled), (.dpadLeft, .arrowLeft, .macro, .disabled),
+                    (.buttonA, .enter, .macro, .openPhrases), (.buttonB, .backspace, .disabled, .rapidDelete),
+                    (.home, .showDesktop, .escape, .disabled), (.menu, .macro, .macro, .disabled),
+                    (.rightShoulder, .volumeUp, .macro, .disabled), (.leftShoulder, .volumeDown, .macro, .disabled),
+                    (.power, .openHarnessSwitcher, .disabled, .switchToNativeMode),
+                    (.buttonY, .switchApplications, .showAllWindows, .showDesktop),
+                ]
+                for (input, single, double, long) in actions {
+                    XCTAssertEqual(model.effectiveMapping[input].action, single, input.rawValue)
+                    XCTAssertEqual(model.effectiveMapping[input, .double].action, double, input.rawValue)
+                    XCTAssertEqual(model.effectiveMapping[input, .long].action, long, input.rawValue)
+                }
+                let recentInputs: [ControllerInput] = [.dpadUp, .dpadRight, .dpadDown, .dpadLeft, .rightShoulder, .leftShoulder]
+                for (offset, input) in recentInputs.enumerated() {
+                    let button = model.mapping[input, .double]
+                    let macro = try XCTUnwrap(model.macros.first { $0.id.uuidString == button.referenceID })
+                    XCTAssertEqual(macro.name, "Codex-转到最近聊天\(offset + 1)")
+                    let plan = try MacroExecutionPlan(macro, macros: model.macros)
+                    XCTAssertEqual(plan.events.count, 1)
+                    XCTAssertEqual(plan.events.first?.mapping.shortcut?.label, "⌥⌘\(offset + 1)")
+                }
+                XCTAssertEqual(model.mappingTitle(model.mapping[.buttonA, .double]), "Codex-新建会话")
+                XCTAssertEqual(model.mappingTitle(model.mapping[.menu]), "Codex-切换会话与标签页")
+                XCTAssertEqual(model.mappingTitle(model.mapping[.menu, .double]), "Codex-新建独立会话")
+                XCTAssertEqual(model.voiceMode, .hold)
+                XCTAssertEqual(model.voiceHoldShortcut, .voiceHoldDefault)
+                XCTAssertEqual(model.effectiveMapping[.options], model.globalButtons.voice)
+                XCTAssertEqual(model.danglingReferenceCount(), 0)
+            }
         }
-        let recentInputs: [ControllerInput] = [.dpadUp, .dpadRight, .dpadDown, .dpadLeft, .rightShoulder, .leftShoulder]
-        for (offset, input) in recentInputs.enumerated() {
-            let button = model.mapping[input, .double]
-            XCTAssertEqual(button.action, .macro)
-            let macro = try XCTUnwrap(model.macros.first { $0.id.uuidString == button.referenceID })
-            XCTAssertEqual(macro.name, "Codex-转到最近聊天\(offset + 1)")
-            let plan = try MacroExecutionPlan(macro, macros: model.macros)
-            XCTAssertEqual(plan.events.count, 1)
-            XCTAssertEqual(plan.events.first?.mapping.shortcut?.label, "⌥⌘\(offset + 1)")
-        }
-        XCTAssertEqual(model.mappingTitle(model.mapping[.buttonA, .double]), "Codex-新建会话")
-        for input: ControllerInput in [.buttonB, .home, .menu, .buttonY] {
-            XCTAssertEqual(model.mapping[input, .double].action, .disabled)
-        }
-        XCTAssertEqual(model.effectiveMapping[.power].action, .openHarnessSwitcher)
-        XCTAssertEqual(model.effectiveMapping[.power, .double].action, .screenshot)
-        XCTAssertEqual(model.effectiveMapping[.power, .long].action, .switchToNativeMode)
-        XCTAssertEqual(model.effectiveMapping[.options], model.globalButtons.voice)
-        XCTAssertEqual(model.danglingReferenceCount(), 0)
     }
 
     func testCodexUpgradePreservesExistingBindingMappingSelectionAndGlobals() throws {
@@ -62,7 +68,7 @@ final class CodexDefaultProfileTests: XCTestCase {
         let profile = SavedKeyProfile(name: "Codex 按键方案", mapping: mapping)
         var harness = try XCTUnwrap(HarnessConfiguration.defaults.first { $0.id == "codex" })
         harness.profileID = profile.id
-        var globals = GlobalButtonSettings()
+        var globals = GlobalButtonSettings().normalized()
         globals.voice = ButtonMapping(action: .fn)
         SettingsStorage.save([profile], SettingsKeys.Stored.profiles, defaults: defaults)
         SettingsStorage.save([harness], SettingsKeys.Stored.harnesses, defaults: defaults)
@@ -136,18 +142,20 @@ final class CodexDefaultProfileTests: XCTestCase {
         let macros = model.macros
         model.resetMapping()
         XCTAssertEqual(model.mapping[.dpadRight].action, .arrowRight)
-        XCTAssertEqual(model.mapping[.menu].action, .copy)
-        XCTAssertEqual(model.mapping[.buttonY].action, .paste)
+        XCTAssertEqual(model.mappingTitle(model.mapping[.menu]), "Codex-切换会话与标签页")
+        XCTAssertEqual(model.mapping[.buttonY].action, .screenshot)
         XCTAssertEqual(model.mapping[.buttonA, .double].referenceID, newChat.id.uuidString)
         XCTAssertEqual(model.mapping[.dpadUp, .double].referenceID, replacementID.uuidString)
         XCTAssertEqual(model.mapping[.leftShoulder, .double].action, .disabled)
         XCTAssertEqual(model.macros, macros)
         XCTAssertEqual(model.globalButtons, globals)
         XCTAssertEqual(model.effectiveMapping[.options].action, .fn)
-        XCTAssertEqual(model.danglingReferenceCount(), 0)
+        // The untouched default scheme still retains both deleted macro IDs.
+        XCTAssertEqual(model.danglingReferenceCount(), 2)
         model.activateProfile(nil)
         model.resetMapping()
-        XCTAssertEqual(model.mapping, .defaults)
+        XCTAssertEqual(model.mapping, .defaults(for: model.remoteProfile, macros: model.macros))
+        XCTAssertEqual(model.danglingReferenceCount(), 0)
         XCTAssertEqual(model.globalButtons, globals)
     }
 }

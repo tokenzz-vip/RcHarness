@@ -91,7 +91,8 @@ struct DeletionImpact: Equatable {
                 }
             }
             let globals = configuration.globalButtons
-            let (direct, indirect) = counts([globals.single, globals.double, globals.long, globals.voice])
+            let mappings = globals.buttons.flatMap { [$0.single, $0.double, $0.long] } + [globals.voice]
+            let (direct, indirect) = counts(mappings)
             if direct + indirect > 0 {
                 uses.append(MappingUse(remoteID: remoteID, profileID: nil, name: "全局按键",
                                        direct: direct, indirect: indirect))

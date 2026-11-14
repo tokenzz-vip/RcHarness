@@ -9,7 +9,7 @@ struct NormalizedKeyProfiles {
 
     init(profiles initialProfiles: [SavedKeyProfile], harnesses initialHarnesses: [HarnessConfiguration],
          selectedHarnessID initialHarnessID: String?, macros: [SavedMacro],
-         migrateLegacy: Bool, defaultMapping: RemoteMapping) {
+         migrateLegacy: Bool, defaultMapping: RemoteMapping, remoteProfile: RemoteProfile) {
         profiles = initialProfiles
         harnesses = initialHarnesses
         selectedHarnessID = initialHarnessID
@@ -65,7 +65,7 @@ struct NormalizedKeyProfiles {
             guard let name = harnesses[index].initialProfileName else { continue }
             if harnesses[index].profileID == nil {
                 let profile = SavedKeyProfile(name: uniqueName(name, existingNames: profiles.map(\.name), fallback: name),
-                                              mapping: harnesses[index].defaultMapping(macros: macros))
+                                              mapping: harnesses[index].defaultMapping(macros: macros, remoteProfile: remoteProfile))
                 profiles.append(profile)
                 harnesses[index].profileID = profile.id
             }

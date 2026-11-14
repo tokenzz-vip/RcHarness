@@ -72,23 +72,208 @@ enum VoiceTriggerMode: String, Codable, CaseIterable {
     case hold, tap
 }
 
+/// One ordinary global-button binding. `input == nil` is used by additional
+/// rows that have been added but not assigned yet.
+struct GlobalButtonEntry: Codable, Equatable, Identifiable {
+    var id = UUID()
+    var input: ControllerInput?
+    var single: ButtonMapping
+    var double: ButtonMapping
+    var long: ButtonMapping
+
+    init(id: UUID = UUID(), input: ControllerInput? = nil,
+         single: ButtonMapping = ButtonMapping(action: .disabled),
+         double: ButtonMapping = ButtonMapping(action: .disabled),
+         long: ButtonMapping = ButtonMapping(action: .disabled)) {
+        self.id = id
+        self.input = input
+        self.single = single
+        self.double = double
+        self.long = long
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, input, single, double, long }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        input = try values.decodeIfPresent(ControllerInput.self, forKey: .input)
+        single = try values.decodeIfPresent(ButtonMapping.self, forKey: .single) ?? ButtonMapping(action: .disabled)
+        double = try values.decodeIfPresent(ButtonMapping.self, forKey: .double) ?? ButtonMapping(action: .disabled)
+        long = try values.decodeIfPresent(ButtonMapping.self, forKey: .long) ?? ButtonMapping(action: .disabled)
+    }
+}
+
 /// Shared by one remote's key profiles; the physical voice key is reserved for voice triggering.
+/// The first three entries are permanent. Only the first must have a key;
+/// optional entries can keep their gestures while their key is unassigned.
 struct GlobalButtonSettings: Codable, Equatable {
-    var input: ControllerInput = .power
-    var single = ButtonMapping(action: .openHarnessSwitcher)
-    var double = ButtonMapping(action: .screenshot)
-    var long = ButtonMapping(action: .switchToNativeMode)
+    static let requiredButtonCount = 3
+
+    var buttons: [GlobalButtonEntry]
     var voice = ButtonMapping(action: .fn)
     var voiceFnTap = false
     var voiceTapShortcut: RecordedShortcut? = .voiceTapDefault
     var voiceMode: VoiceTriggerMode? = .hold
 
+    var input: ControllerInput {
+        get { buttons.first?.input ?? .power }
+        set {
+            if buttons.isEmpty { buttons = [GlobalButtonEntry(input: newValue)] }
+            else { buttons[0].input = newValue }
+        }
+    }
+    var single: ButtonMapping {
+        get { buttons.first?.single ?? ButtonMapping(action: .disabled) }
+        set {
+            if buttons.isEmpty { buttons = [GlobalButtonEntry(input: .power, single: newValue)] }
+            else { buttons[0].single = newValue }
+        }
+    }
+    var double: ButtonMapping {
+        get { buttons.first?.double ?? ButtonMapping(action: .disabled) }
+        set {
+            if buttons.isEmpty { buttons = [GlobalButtonEntry(input: .power, double: newValue)] }
+            else { buttons[0].double = newValue }
+        }
+    }
+    var long: ButtonMapping {
+        get { buttons.first?.long ?? ButtonMapping(action: .disabled) }
+        set {
+            if buttons.isEmpty { buttons = [GlobalButtonEntry(input: .power, long: newValue)] }
+            else { buttons[0].long = newValue }
+        }
+    }
+
+    init(input: ControllerInput = .power,
+         single: ButtonMapping = ButtonMapping(action: .openHarnessSwitcher),
+         double: ButtonMapping = ButtonMapping(action: .screenshot),
+         long: ButtonMapping = ButtonMapping(action: .switchToNativeMode),
+         additionalButtons: [GlobalButtonEntry] = [],
+         voice: ButtonMapping = ButtonMapping(action: .fn),
+         voiceFnTap: Bool = false,
+         voiceTapShortcut: RecordedShortcut? = .voiceTapDefault,
+         voiceMode: VoiceTriggerMode? = .hold) {
+        buttons = [GlobalButtonEntry(input: input, single: single, double: double, long: long)] + additionalButtons
+        self.voice = voice
+        self.voiceFnTap = voiceFnTap
+        self.voiceTapShortcut = voiceTapShortcut
+        self.voiceMode = voiceMode
+    }
+
+    init(buttons: [GlobalButtonEntry],
+         voice: ButtonMapping = ButtonMapping(action: .fn),
+         voiceFnTap: Bool = false,
+         voiceTapShortcut: RecordedShortcut? = .voiceTapDefault,
+         voiceMode: VoiceTriggerMode? = .hold) {
+        self.buttons = buttons.isEmpty
+            ? [GlobalButtonEntry(input: .power,
+                                 single: ButtonMapping(action: .openHarnessSwitcher),
+                                 double: ButtonMapping(action: .screenshot),
+                                 long: ButtonMapping(action: .switchToNativeMode))]
+            : buttons
+        self.voice = voice
+        self.voiceFnTap = voiceFnTap
+        self.voiceTapShortcut = voiceTapShortcut
+        self.voiceMode = voiceMode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case buttons, input, single, double, long, voice, voiceFnTap, voiceTapShortcut, voiceMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        if let decoded = try values.decodeIfPresent([GlobalButtonEntry].self, forKey: .buttons), !decoded.isEmpty {
+            buttons = decoded
+        } else {
+            buttons = [GlobalButtonEntry(
+                input: try values.decodeIfPresent(ControllerInput.self, forKey: .input) ?? .power,
+                single: try values.decodeIfPresent(ButtonMapping.self, forKey: .single)
+                    ?? ButtonMapping(action: .openHarnessSwitcher),
+                double: try values.decodeIfPresent(ButtonMapping.self, forKey: .double)
+                    ?? ButtonMapping(action: .screenshot),
+                long: try values.decodeIfPresent(ButtonMapping.self, forKey: .long)
+                    ?? ButtonMapping(action: .switchToNativeMode)
+            )]
+        }
+        voice = try values.decodeIfPresent(ButtonMapping.self, forKey: .voice) ?? ButtonMapping(action: .fn)
+        voiceFnTap = try values.decodeIfPresent(Bool.self, forKey: .voiceFnTap) ?? false
+        voiceTapShortcut = try values.decodeIfPresent(RecordedShortcut.self, forKey: .voiceTapShortcut) ?? .voiceTapDefault
+        voiceMode = try values.decodeIfPresent(VoiceTriggerMode.self, forKey: .voiceMode) ?? .hold
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(buttons, forKey: .buttons)
+        // Keep the legacy fields in exported JSON so older RcHarness versions
+        // continue to use the required first binding when they read a backup.
+        try values.encode(input, forKey: .input)
+        try values.encode(single, forKey: .single)
+        try values.encode(double, forKey: .double)
+        try values.encode(long, forKey: .long)
+        try values.encode(voice, forKey: .voice)
+        try values.encode(voiceFnTap, forKey: .voiceFnTap)
+        try values.encodeIfPresent(voiceTapShortcut, forKey: .voiceTapShortcut)
+        try values.encodeIfPresent(voiceMode, forKey: .voiceMode)
+    }
+
     var holdShortcut: RecordedShortcut { voice.shortcutForVoice ?? .voiceHoldDefault }
+
+    private static var homeButton: GlobalButtonEntry {
+        GlobalButtonEntry(input: .home,
+                          single: ButtonMapping(action: .showDesktop),
+                          double: ButtonMapping(action: .escape))
+    }
+
+    /// Seed each remote only when it has no saved global-button settings.
+    static func defaults(for profile: RemoteProfile) -> Self {
+        let input: ControllerInput = profile.adapter == .chromecast ? .inputSource : .buttonY
+        let tapShortcut = profile.adapter == .chromecast
+            ? VoiceShortcutChoice.pairs.first { $0.keys == [.function, .leftCommand] }!.shortcut
+            : .voiceTapDefault
+        return Self(double: ButtonMapping(action: .disabled), additionalButtons: [
+            homeButton,
+            GlobalButtonEntry(input: input,
+                single: ButtonMapping(action: .switchApplications),
+                double: ButtonMapping(action: .showAllWindows),
+                long: ButtonMapping(action: .showDesktop))
+        ], voiceTapShortcut: tapShortcut, voiceMode: profile.adapter == .chromecast ? .tap : .hold)
+            .normalized(for: profile)
+    }
 
     func normalized(for profile: RemoteProfile = RemoteProfiles.xiaomiRC003) -> Self {
         var result = self
+        if result.buttons.isEmpty {
+            result.buttons = [GlobalButtonEntry(input: .power,
+                                                single: ButtonMapping(action: .openHarnessSwitcher),
+                                                double: ButtonMapping(action: .screenshot),
+                                                long: ButtonMapping(action: .switchToNativeMode))]
+        }
+        // Upgrade the previous two-key defaults without changing either key's
+        // gestures. Custom one/two-key configurations receive empty optional rows.
+        let thirdInput: ControllerInput = profile.adapter == .chromecast ? .inputSource : .buttonY
+        if result.buttons.count == 2, result.buttons[0].input == .power, result.buttons[1].input == thirdInput,
+           !result.buttons.contains(where: { $0.input == .home }) {
+            result.buttons.insert(Self.homeButton, at: 1)
+        }
+        while result.buttons.count < Self.requiredButtonCount {
+            result.buttons.append(GlobalButtonEntry())
+        }
         // Older configurations could assign the ordinary global role to the voice key.
-        if result.input == .options || !profile.inputs.contains(result.input) { result.input = .power }
+        if result.buttons[0].input == nil || result.input == .options || !profile.inputs.contains(result.input) {
+            result.input = .power
+        }
+        var usedInputs: Set<ControllerInput> = [result.input]
+        if result.buttons.count > 1 {
+            for index in result.buttons.indices.dropFirst() {
+                guard let input = result.buttons[index].input,
+                      input != .options, profile.inputs.contains(input), usedInputs.insert(input).inserted else {
+                    result.buttons[index].input = nil
+                    continue
+                }
+            }
+        }
         let hold = VoiceShortcutChoice.normalized(result.voice.shortcutForVoice, mode: .hold)
         if result.voice.shortcutForVoice != hold {
             result.voice = hold == .voiceHoldDefault ? ButtonMapping(action: .fn)
@@ -110,9 +295,12 @@ struct GlobalButtonSettings: Codable, Equatable {
     func applying(to mapping: RemoteMapping, profile: RemoteProfile = RemoteProfiles.xiaomiRC003) -> RemoteMapping {
         let settings = normalized(for: profile)
         var result = mapping
-        result[settings.input, .single] = settings.single
-        result[settings.input, .double] = settings.double
-        result[settings.input, .long] = settings.long
+        for button in settings.buttons {
+            guard let input = button.input else { continue }
+            result[input, .single] = button.single
+            result[input, .double] = button.double
+            result[input, .long] = button.long
+        }
         for trigger in ButtonTrigger.allCases { result[.options, trigger] = ButtonMapping(action: .disabled) }
         result[.options] = settings.voiceMode == .tap
             ? ButtonMapping(action: .recordedShortcut, shortcut: settings.voiceTapShortcut)

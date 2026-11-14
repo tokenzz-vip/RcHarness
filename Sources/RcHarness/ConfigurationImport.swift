@@ -74,10 +74,12 @@ struct PreparedConfiguration {
         let normalized = NormalizedKeyProfiles(profiles: isLegacy ? original.profiles : current?.profiles ?? [],
             harnesses: harnesses, selectedHarnessID: preservingSelection ? current?.selectedHarnessID : nil,
             macros: macros, migrateLegacy: isLegacy && original.version == 1,
-            defaultMapping: isLegacy ? original.mapping : .defaults)
+            defaultMapping: isLegacy ? original.mapping : .defaults(for: remoteProfile, macros: macros),
+            remoteProfile: remoteProfile)
         let defaultMapping = normalized.profiles.first { $0.id == SavedKeyProfile.defaultID }!.mapping
         let globals = (current?.globalButtons ?? (isLegacy ? original.globalButtons : nil)
-            ?? .migrating(defaultMapping, voiceFnTap: false)).normalized(for: remoteProfile)
+            ?? (isLegacy ? .migrating(defaultMapping, voiceFnTap: false) : .defaults(for: remoteProfile)))
+            .normalized(for: remoteProfile)
         var selectedProfileID = SavedKeyProfile.defaultID
         var selectedHarnessID: String?
         if preservingSelection {
@@ -129,7 +131,7 @@ struct PreparedConfiguration {
         let configurations = Array((backup.remoteKeyConfigurations ?? [:]).values)
         let buttons = configurations.flatMap(\.profiles).flatMap(\.mapping.buttons.values).filter(isDangling).count
         let globals = configurations.flatMap {
-            [$0.globalButtons.single, $0.globalButtons.double, $0.globalButtons.long, $0.globalButtons.voice]
+            $0.globalButtons.buttons.flatMap { [$0.single, $0.double, $0.long] } + [$0.globalButtons.voice]
         }.filter(isDangling).count
         let steps = backup.macros.flatMap(\.steps).map(\.mapping).filter(isDangling).count
         let slots = (backup.phraseAssignments ?? PhraseAssignments()).slots.values.filter { !phraseIDs.contains($0.uuidString) }.count

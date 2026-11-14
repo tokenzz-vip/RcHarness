@@ -45,12 +45,12 @@ final class HarnessTests: XCTestCase {
             XCTAssertTrue(harness.didInitializeDefaultProfile)
             let generated = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
             XCTAssertEqual(generated.name, "OpenCode 按键方案")
-            XCTAssertEqual(generated.mapping, .defaults)
+            XCTAssertEqual(generated.mapping, harness.defaultMapping(macros: model.macros, remoteProfile: model.remoteProfile))
             XCTAssertEqual(model.profiles.filter { $0.name == generated.name }.count, 1)
             model.matchApplication("/Applications/OpenCode.app", bundleIdentifier: "AI.OPENCODE.DESKTOP")
             XCTAssertEqual(model.selectedHarnessID, harness.id)
             XCTAssertEqual(model.selectedProfileID, generated.id)
-            XCTAssertEqual(model.mapping, .defaults)
+            XCTAssertEqual(model.mapping, harness.defaultMapping(macros: model.macros, remoteProfile: model.remoteProfile))
             XCTAssertFalse(harness.matches(applicationPath: "/Applications/OpenCode.app", bundleIdentifier: "other.app"))
         }
         let generatedID = try XCTUnwrap(model.harnesses.last?.profileID)
@@ -84,7 +84,7 @@ final class HarnessTests: XCTestCase {
         let initialProfileID = try XCTUnwrap(harness.profileID)
         let initialProfile = try XCTUnwrap(model.profiles.first { $0.id == initialProfileID })
         XCTAssertEqual(initialProfile.name, "WorkBuddy 按键方案")
-        XCTAssertEqual(initialProfile.mapping, .defaults)
+        XCTAssertEqual(initialProfile.mapping, harness.defaultMapping(macros: model.macros, remoteProfile: model.remoteProfile))
         XCTAssertTrue(harness.didInitializeDefaultProfile)
         XCTAssertEqual(model.selectedProfileID, SavedKeyProfile.defaultID)
         let profile = makeProfile(model)
@@ -149,7 +149,7 @@ final class HarnessTests: XCTestCase {
         json.removeValue(forKey: "didInitializeDefaultProfile")
         defaults.set(try JSONSerialization.data(withJSONObject: [json]), forKey: "RcHarness.harnesses")
         SettingsStorage.save([profile], SettingsKeys.Stored.profiles, defaults: defaults)
-        var globals = GlobalButtonSettings()
+        var globals = GlobalButtonSettings().normalized()
         globals.voice = ButtonMapping(action: .fn)
         globals.voiceFnTap = true
         SettingsStorage.save(globals, SettingsKeys.Stored.globalButtons, defaults: defaults)
@@ -160,7 +160,7 @@ final class HarnessTests: XCTestCase {
         let harness = try XCTUnwrap(model.harnesses.first)
         let generated = try XCTUnwrap(model.profiles.first { $0.id == harness.profileID })
         XCTAssertEqual(generated.name, "WorkBuddy 按键方案")
-        XCTAssertEqual(generated.mapping, .defaults)
+        XCTAssertEqual(generated.mapping, harness.defaultMapping(macros: model.macros, remoteProfile: model.remoteProfile))
         XCTAssertFalse(harness.isEnabled)
         XCTAssertEqual(model.selectedProfileID, profile.id)
         XCTAssertNil(model.selectedHarnessID)
@@ -189,7 +189,7 @@ final class HarnessTests: XCTestCase {
         XCTAssertNotEqual(generatedID, existing.id)
         let generated = try XCTUnwrap(model.profiles.first { $0.id == generatedID })
         XCTAssertEqual(generated.name, "WorkBuddy 按键方案 2")
-        XCTAssertEqual(generated.mapping, .defaults)
+        XCTAssertEqual(generated.mapping, harness.defaultMapping(macros: model.macros, remoteProfile: model.remoteProfile))
         XCTAssertEqual(model.profiles.first { $0.id == existing.id }, existing)
     }
 
@@ -617,7 +617,7 @@ final class HarnessTests: XCTestCase {
         let cursorProfile = try XCTUnwrap(model.profiles.first { $0.id == cursor.profileID })
         XCTAssertNotEqual(cursorProfile.id, harnesses[2].profileID)
         XCTAssertEqual(cursorProfile.name, "Cursor 按键方案")
-        XCTAssertEqual(cursorProfile.mapping, .defaults)
+        XCTAssertEqual(cursorProfile.mapping, cursor.defaultMapping(macros: model.macros, remoteProfile: model.remoteProfile))
         let importedHarnesses = model.harnesses
         XCTAssertEqual(model.profiles.filter { $0.id == profile.id }.count, 1)
         var invalid = backup

@@ -39,7 +39,7 @@ final class DefaultMacroTests: XCTestCase {
         }
     }
 
-    func testFreshInstallProvidesExecutableAppShortcutsWithoutChangingBindings() throws {
+    func testFreshInstallProvidesExecutableAppShortcutsAndDefaultScheme() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         XCTAssertEqual(model.macros, allPresets)
         XCTAssertEqual(model.macros.filter { $0.name.hasPrefix("Codex-") }.count, DefaultMacros.codex.count)
@@ -53,7 +53,7 @@ final class DefaultMacroTests: XCTestCase {
         let stepIDs = model.macros.flatMap { $0.steps.map(\.id) }
         XCTAssertEqual(Set(stepIDs).count, stepIDs.count)
         XCTAssertTrue(Set(stepIDs).isDisjoint(with: Set(model.macros.map(\.id))))
-        XCTAssertEqual(model.mapping, .defaults)
+        XCTAssertEqual(model.mapping, .defaults(for: model.remoteProfile, macros: model.macros))
         for macro in model.macros {
             let plan = try MacroExecutionPlan(macro, macros: model.macros)
             XCTAssertEqual(plan.events.count, macro.name == "DeepSeek-停止回复（双击 Esc）" ? 2 : 1)
