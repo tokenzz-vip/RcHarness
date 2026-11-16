@@ -25,14 +25,12 @@ final class PhraseAssignmentTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         await flushUI()
         let existing = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
-        for point in [NSPoint(x: 256, y: 315), NSPoint(x: 188, y: 383), NSPoint(x: 324, y: 383),
-                      NSPoint(x: 256, y: 451), NSPoint(x: 256, y: 383)] {
-            try click(point, in: host, window: window)
+        for input in PhraseAssignments.inputs {
+            let anchor = try clickPad(input, in: host)
             await flushUI()
             let popup = NSApp.windows.first { $0.isVisible && !existing.contains($0.windowNumber) }
-            XCTAssertNotNil(popup, "Direction icon at \(point) must open a popover in the real window; bounds=\(host.bounds)")
+            XCTAssertNotNil(popup, "\(input.label) must open a popover in the real window; bounds=\(host.bounds)")
             if let popup {
-                let anchor = window.convertPoint(toScreen: host.convert(point, to: nil))
                 XCTAssertGreaterThan(popup.frame.midX, anchor.x, "The picker should open to the right when there is room")
                 try click(NSPoint(x: 100, y: 103), in: XCTUnwrap(popup.contentView), window: popup)
                 await flushUI()
@@ -41,6 +39,14 @@ final class PhraseAssignmentTests: XCTestCase {
     }
 
     func testEveryAssignmentPopoverSearchesAndUpdatesOnlyItsOwnSlot() async throws {
+        try await checkAssignmentPopovers(height: 650)
+    }
+
+    func testAssignmentPopoversFollowThePadInATallerWindow() async throws {
+        try await checkAssignmentPopovers(height: 850)
+    }
+
+    private func checkAssignmentPopovers(height: CGFloat) async throws {
         let popovers = try NonAnimatingPopovers()
         defer { popovers.restore() }
         _ = NSApplication.shared
@@ -53,7 +59,7 @@ final class PhraseAssignmentTests: XCTestCase {
                          SavedPhrase(title: "更多内容", text: "另一个条目")]
         model.phraseAssignments = PhraseAssignments()
         let host = NSHostingView(rootView: PhrasesPage(model: model).background(Color(nsColor: .windowBackgroundColor)))
-        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 920, height: 650),
+        let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 920, height: height),
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: ProcessInfo.processInfo.environment["RC_HARNESS_UI_DARK"] == "1" ? .darkAqua : .aqua)
@@ -65,9 +71,7 @@ final class PhraseAssignmentTests: XCTestCase {
         let existingWindows = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
         var expected = PhraseAssignments()
         for input in PhraseAssignments.inputs {
-            // The 212-point wheel starts at (20, 163) in this fixed-size page fixture.
-            let position = PhrasePadLayout.position(for: input)
-            try click(NSPoint(x: 20 + position.x, y: 163 + position.y), in: host, window: window)
+            try clickPad(input, in: host)
             await flushUI()
             let popup = try XCTUnwrap(NSApp.windows.first { $0.isVisible && !existingWindows.contains($0.windowNumber) },
                                      "Clicking \(input.label) must open the phrase selection popover")
@@ -84,8 +88,7 @@ final class PhraseAssignmentTests: XCTestCase {
             XCTAssertFalse(popup.isVisible, "Selecting a phrase must close this picker before opening another key")
             try assertListMatchesModel(model, in: host)
         }
-        let up = PhrasePadLayout.position(for: .dpadUp)
-        try click(NSPoint(x: 20 + up.x, y: 163 + up.y), in: host, window: window)
+        try clickPad(.dpadUp, in: host)
         await flushUI()
         let replacementPopup = try XCTUnwrap(NSApp.windows.first { $0.isVisible && !existingWindows.contains($0.windowNumber) })
         let replacementEditor = try XCTUnwrap(replacementPopup.firstResponder as? NSTextView)
@@ -96,8 +99,7 @@ final class PhraseAssignmentTests: XCTestCase {
         expected[.dpadUp] = model.phrases[0].id
         XCTAssertEqual(model.phraseAssignments, expected)
         try assertListMatchesModel(model, in: host)
-        let right = PhrasePadLayout.position(for: .dpadRight)
-        try click(NSPoint(x: 20 + right.x, y: 163 + right.y), in: host, window: window)
+        try clickPad(.dpadRight, in: host)
         await flushUI()
         let popup = try XCTUnwrap(NSApp.windows.first { $0.isVisible && !existingWindows.contains($0.windowNumber) })
         let editor = try XCTUnwrap(popup.firstResponder as? NSTextView)
@@ -110,8 +112,7 @@ final class PhraseAssignmentTests: XCTestCase {
         XCTAssertEqual(model.phraseAssignments, expected, "Unassign must remain available when search has no matches")
         try assertListMatchesModel(model, in: host)
         for input in PhraseAssignments.inputs where expected[input] != nil {
-            let position = PhrasePadLayout.position(for: input)
-            try click(NSPoint(x: 20 + position.x, y: 163 + position.y), in: host, window: window)
+            try clickPad(input, in: host)
             await flushUI()
             let popup = try XCTUnwrap(NSApp.windows.first { $0.isVisible && !existingWindows.contains($0.windowNumber) })
             try click(NSPoint(x: 100, y: 103), in: XCTUnwrap(popup.contentView), window: popup)
@@ -221,6 +222,26 @@ final class PhraseAssignmentTests: XCTestCase {
         XCTAssertEqual(presses, [.dpadUp, nil, nil])
         view.mouseUp(with: try event(.leftMouseUp, NSPoint(x: 106, y: 26)))
         XCTAssertTrue(selections.isEmpty, "A release without a matching press must not select a key")
+    }
+
+    /// SwiftUI distributes the panel's spacers differently across window sizes
+    /// and AppKit versions. Route through the laid-out native pointer surface.
+    @discardableResult
+    private func clickPad(_ input: ControllerInput, in host: NSView) throws -> NSPoint {
+        func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+        host.layoutSubtreeIfNeeded()
+        let pad = try XCTUnwrap(descendants(host).compactMap { $0 as? PhrasePadInputView }.first)
+        let window = try XCTUnwrap(pad.window)
+        let position = PhrasePadLayout.position(for: input)
+        let point = NSPoint(x: pad.bounds.minX + position.x * pad.bounds.width / 212,
+                            y: pad.bounds.minY + position.y * pad.bounds.height / 212)
+        let content = try XCTUnwrap(window.contentView)
+        let hit = content.hitTest(pad.convert(point, to: content.superview))
+        _ = try XCTUnwrap(hit === pad ? hit : nil,
+                          "\(input.label) at \(point) must hit the actual pad; frame=\(pad.convert(pad.bounds, to: content))")
+        let anchor = window.convertPoint(toScreen: pad.convert(point, to: nil))
+        try clickInTestWindow(point, in: pad)
+        return anchor
     }
 
     private func click(_ point: NSPoint, in view: NSView, window: NSWindow) throws {
