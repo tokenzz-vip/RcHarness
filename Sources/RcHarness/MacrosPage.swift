@@ -189,34 +189,30 @@ struct MacrosPage: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     // Step editors contain native controls; defer offscreen rows for long actions.
-                    VStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
-                        LazyVStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
-                            if steps.wrappedValue.isEmpty {
-                                Text("还没有步骤，点击下方“添加步骤”开始配置。")
-                                    .font(.callout).foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
-                            }
-                            ForEach(steps) { $step in
-                                VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
-                                    HStack {
-                                        Text("步骤 \((macro.steps.firstIndex(where: { $0.id == step.id }) ?? 0) + 1)")
-                                            .font(SettingsStyle.Typography.body.weight(.semibold))
-                                        Spacer()
-                                        Button { steps.wrappedValue.removeAll { $0.id == step.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("移除步骤")
-                                    }
-                                    ActionMappingEditor(value: $step.mapping, model: model, filter: .all, parentMacroID: macro.id)
-                                    HStack {
-                                        Text("执行后等待").font(.caption).foregroundStyle(.secondary)
-                                        Slider(value: $step.delay, in: 0...3, step: 0.1)
-                                        Text(String(format: "%.1f 秒", step.delay)).font(.caption.monospacedDigit()).frame(width: 45)
-                                    }
-                                }
-                                .padding(SettingsStyle.controlPadding).background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
-                                .id(ScrollTarget.step(step.id))
-                            }
+                    LazyVStack(alignment: .leading, spacing: SettingsStyle.Spacing.controls) {
+                        if steps.wrappedValue.isEmpty {
+                            Text("还没有步骤，点击下方“添加步骤”开始配置。")
+                                .font(.callout).foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
                         }
-                        // Keep the footer outside the lazy rows so its scroll target is
-                        // always realized, even when the preceding rows have only estimated heights.
+                        ForEach(steps) { $step in
+                            VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
+                                HStack {
+                                    Text("步骤 \((macro.steps.firstIndex(where: { $0.id == step.id }) ?? 0) + 1)")
+                                        .font(SettingsStyle.Typography.body.weight(.semibold))
+                                    Spacer()
+                                    Button { steps.wrappedValue.removeAll { $0.id == step.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("移除步骤")
+                                }
+                                ActionMappingEditor(value: $step.mapping, model: model, filter: .all, parentMacroID: macro.id)
+                                HStack {
+                                    Text("执行后等待").font(.caption).foregroundStyle(.secondary)
+                                    Slider(value: $step.delay, in: 0...3, step: 0.1)
+                                    Text(String(format: "%.1f 秒", step.delay)).font(.caption.monospacedDigit()).frame(width: 45)
+                                }
+                            }
+                            .padding(SettingsStyle.controlPadding).background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
+                            .id(ScrollTarget.step(step.id))
+                        }
                         Button { steps.wrappedValue.append(MacroStep()) } label: {
                             Label("添加步骤", systemImage: "plus")
                         }
