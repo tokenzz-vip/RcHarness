@@ -237,9 +237,20 @@ final class MacrosEditorInteractionTests: XCTestCase {
         try fixture.clickAddStep()
         await fixture.settle()
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: NSScrollView())
+        let originalViewportHeight = try fixture.editor.contentView.bounds.height
         fixture.window.setContentSize(NSSize(width: 960, height: 490))
         await fixture.settle()
         XCTAssertEqual(fixture.steps.count, 51)
+        // The footer is eager, but SwiftUI can realize the last row in a later layout pass.
+        let lastStepVisible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                guard let editor = try? fixture.editor, editor.contentView.bounds.height < originalViewportHeight,
+                      let controls = try? fixture.visibleActionControls else { return false }
+                return controls.contains { $0.accessibilityValue() as? String == RemoteAction.enter.label }
+            }
+        }, object: nil)
+        lastStepVisible.expectationDescription = "The newly added Enter step is visible in the resized editor"
+        await fulfillment(of: [lastStepVisible], timeout: 2)
         try fixture.assertLastStepVisible()
         try fixture.snapshot("added-step-after-resize")
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification,
@@ -286,7 +297,7 @@ final class MacrosEditorInteractionTests: XCTestCase {
                         shortcut: RecordedShortcut(keyCode: 40, modifiers: CGEventFlags.maskCommand.rawValue, label: "⌘K"))
                     case 3: step.mapping = ButtonMapping(action: .macro, referenceID: childID.uuidString)
                     case 4: step.mapping = ButtonMapping(action: .openApplication, applicationPath: "/Applications/Utilities/Terminal.app")
-                    default: break
+                    default: step.mapping = ButtonMapping(action: .escape)
                     }
                 }
                 return step
