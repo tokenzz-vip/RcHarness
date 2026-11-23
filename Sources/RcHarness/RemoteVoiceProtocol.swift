@@ -85,8 +85,8 @@ extension RemoteProfile {
             : [0x0A, 0x01, 0x00, 0x00, 0x03, 0x03]
     }
 
-    func voiceCapabilitiesRequest(mode: VoiceTriggerMode) -> [UInt8] {
-        guard supportsVoiceTap, mode == .tap else { return voiceCapabilitiesRequest }
+    func voiceCapabilitiesRequest(mode: VoiceTriggerMode, tapAllowed: Bool = false) -> [UInt8] {
+        guard (supportsVoiceTap || tapAllowed), mode == .tap else { return voiceCapabilitiesRequest }
         // Retain native HTT notifications to track press/release. A short
         // release then opens an on-request stream; keep the supported codec
         // limited to the existing 16 kHz decoder.

@@ -2,6 +2,16 @@ import XCTest
 @testable import RcHarness
 
 final class RemoteTests: XCTestCase {
+    @MainActor
+    func testTapVoiceKeepsBLEAndHIDEventsOnOneCoordinator() {
+        XCTAssertTrue(RcHarnessApp.shouldRouteTapThroughRemoteVoice(
+            input: .options, voiceMode: .tap, applicationSwitcherPresented: false))
+        XCTAssertFalse(RcHarnessApp.shouldRouteTapThroughRemoteVoice(
+            input: .buttonA, voiceMode: .tap, applicationSwitcherPresented: false))
+        XCTAssertFalse(RcHarnessApp.shouldRouteTapThroughRemoteVoice(
+            input: .options, voiceMode: .tap, applicationSwitcherPresented: true))
+    }
+
     func testCancelledAndStoppedVoiceEventsCannotRestartTheOldRecording() {
         var gate = RemoteVoiceSessionGate()
         XCTAssertTrue(gate.acceptsImplicitStart(at: 10))

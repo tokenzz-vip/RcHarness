@@ -455,17 +455,61 @@ struct MappingEditorSheet: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(SettingsStyle.pagePadding)
+            .padding(.horizontal, SettingsStyle.pagePadding)
+            .padding(.vertical, draft.input == .options ? 16 : SettingsStyle.pagePadding)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
+            if draft.input == .options {
+                editorContent
+            } else {
+                ScrollView {
+                    editorContent
+                }
+                .scrollIndicators(.hidden)
+            }
+            Divider()
+            HStack {
+                if draft.hasIncompleteShortcut {
+                    Text("请为所选触发方式设置快捷键。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("取消", role: .cancel) { model.editorVisible = false }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("mapping-editor-cancel")
+                Button("保存") {
+                    if model.saveMappingEditor(draft) { model.editorVisible = false }
+                }
+                    .accessibilityIdentifier("mapping-editor-save")
+                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                .disabled(draft.hasIncompleteShortcut)
+            }
+            .padding(.horizontal, SettingsStyle.pagePadding)
+            .padding(.vertical, draft.input == .options ? 12 : 16)
+        }
+        .frame(width: 560, height: editorHeight)
+    }
+
+    @ViewBuilder
+    private var editorContent: some View {
+        VStack(alignment: .leading, spacing: SettingsStyle.Spacing.groups) {
                     Text(draft.input == .options ? "两种模式分别绑定快捷键，请与语音工具的设置保持一致。" : "选择这个按键要执行的操作")
                         .font(.callout).foregroundStyle(.secondary)
                     if draft.input == .options {
+                        HStack(alignment: .center, spacing: SettingsStyle.Spacing.controls) {
+                            Toggle("使用遥控器麦克风", isOn: $model.useRemoteMicrophone)
+                                .toggleStyle(.switch)
+                            Text(model.useRemoteMicrophone
+                                 ? "开启后使用遥控器麦克风，语音工具请选择 RcHarness 遥控器麦克风。"
+                                 : "关闭后使用其他麦克风，需在语音工具内做调整。")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         voiceModeCard(.hold, title: "长按模式", detail: "按住说话，松手结束。尾音排空后释放快捷键。", shortcut: $draft.voiceHoldShortcut)
                         voiceModeCard(.tap, title: "点按模式", detail: "按一次开始说话，再按语音键结束，也可按其他遥控器按键结束。", shortcut: $draft.voiceTapShortcut)
-                        if !model.remoteProfile.supportsVoiceTap {
-                            Text("\(model.remoteProfile.shortName) 松手后会停止收音，仅可启用长按模式。点按快捷键仍可配置。")
+                        if !model.voiceTapAvailable {
+                            Text("使用遥控器麦克风时，\(model.remoteProfile.shortName) 仅支持长按模式。关闭后可使用点按模式。")
                                 .font(.caption).foregroundStyle(.secondary)
                         } else {
                             Text("点按模式需与输入法的点按快捷键一致。首次使用请确认松手后仍能收音；不兼容时可切回长按模式。")
@@ -491,30 +535,9 @@ struct MappingEditorSheet: View {
                             .id(draft.trigger)
                     }
                 }
-                .padding(SettingsStyle.pagePadding)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Divider()
-            HStack {
-                if draft.hasIncompleteShortcut {
-                    Text("请为所选触发方式设置快捷键。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("取消", role: .cancel) { model.editorVisible = false }
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier("mapping-editor-cancel")
-                Button("保存") {
-                    if model.saveMappingEditor(draft) { model.editorVisible = false }
-                }
-                    .accessibilityIdentifier("mapping-editor-save")
-                    .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
-                .disabled(draft.hasIncompleteShortcut)
-            }
-            .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, 16)
-        }
-        .frame(width: 560, height: editorHeight)
+            .padding(.horizontal, SettingsStyle.pagePadding)
+            .padding(.vertical, draft.input == .options ? 16 : SettingsStyle.pagePadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var editorHeight: CGFloat {
@@ -523,7 +546,7 @@ struct MappingEditorSheet: View {
     }
 
     private func voiceModeCard(_ mode: VoiceTriggerMode, title: String, detail: String, shortcut: Binding<RecordedShortcut>) -> some View {
-        let unavailable = mode == .tap && !model.remoteProfile.supportsVoiceTap
+        let unavailable = mode == .tap && !model.voiceTapAvailable
         return VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
             HStack {
                 Button { draft.voiceMode = mode } label: {
@@ -540,7 +563,7 @@ struct MappingEditorSheet: View {
             Text(mode == .hold ? "选择一个按键。" : "选择一个按键，或两个不同按键的组合。")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(SettingsStyle.controlPadding)
+        .padding(10)
         .background(SettingsStyle.subtle, in: RoundedRectangle(cornerRadius: SettingsStyle.controlRadius))
     }
 }

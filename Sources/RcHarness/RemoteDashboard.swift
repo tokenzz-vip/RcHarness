@@ -145,23 +145,36 @@ final class RemoteDashboardModel: ObservableObject {
             onGainChange?(gain)
         }
     }
+    /// When enabled, the target voice tool uses the remote's virtual microphone.
+    /// Disabling it leaves microphone capture to the target tool.
+    @Published var useRemoteMicrophone: Bool {
+        didSet {
+            guard useRemoteMicrophone != oldValue else { return }
+            defaults.set(useRemoteMicrophone, forKey: SettingsKeys.useRemoteMicrophone)
+            setup.usesRemoteMicrophone = useRemoteMicrophone
+            let normalized = globalButtons.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
+            if normalized != globalButtons { globalButtons = normalized }
+            onVoiceTriggerChange?()
+        }
+    }
+    var voiceTapAvailable: Bool { remoteProfile.supportsVoiceTap || !useRemoteMicrophone }
     var voiceFnTap: Bool {
         get { remoteProfile.supportsVoiceTap && globalButtons.voiceFnTap }
         set {
             var settings = globalButtons
             settings.voiceFnTap = newValue
-            let normalized = settings.normalized(for: remoteProfile)
+            let normalized = settings.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
             guard normalized != globalButtons else { return }
             globalButtons = normalized
             onVoiceTriggerChange?()
         }
     }
     var voiceMode: VoiceTriggerMode {
-        get { remoteProfile.supportsVoiceTap ? (globalButtons.voiceMode ?? .hold) : .hold }
+        get { voiceTapAvailable ? (globalButtons.voiceMode ?? .hold) : .hold }
         set {
             var settings = globalButtons
             settings.voiceMode = newValue
-            setGlobalButtons(settings)
+            setGlobalButtons(settings.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable))
         }
     }
     var voiceHoldShortcut: RecordedShortcut {
@@ -257,12 +270,15 @@ final class RemoteDashboardModel: ObservableObject {
         selectedHarnessID = defaults.string(forKey: SettingsKeys.selectedHarnessID)
         let savedGain = defaults.double(forKey: SettingsKeys.gain)
         gain = savedGain.isFinite ? min(24, max(0, savedGain)) : 0
+        useRemoteMicrophone = defaults.object(forKey: SettingsKeys.useRemoteMicrophone) as? Bool ?? true
         outputUID = defaults.string(forKey: SettingsKeys.outputUID) ?? RemoteMicrophoneOutput.deviceUID
         showDockIcon = defaults.object(forKey: SettingsKeys.showDockIcon) as? Bool ?? true
         showKeyProfilePrefix = defaults.bool(forKey: SettingsKeys.showKeyProfilePrefix)
         openAtLaunch = defaults.object(forKey: SettingsKeys.openAtLaunch) as? Bool ?? true
         themeMode = defaults.string(forKey: SettingsKeys.themeMode).flatMap(AppThemeMode.init(rawValue:)) ?? .system
         selectedProfileID = defaults.string(forKey: SettingsKeys.selectedProfileID).flatMap(UUID.init(uuidString:))
+        setup.usesRemoteMicrophone = useRemoteMicrophone
+        defaults.set(useRemoteMicrophone, forKey: SettingsKeys.useRemoteMicrophone)
         let legacyBindings = defaults.integer(forKey: SettingsKeys.profileBindingsVersion) < 2
         let hasSavedConfiguration = SettingsStorage.contains(SettingsKeys.Stored.harnesses, defaults: defaults)
             || SettingsStorage.contains(SettingsKeys.Stored.profiles, defaults: defaults)
@@ -298,7 +314,7 @@ final class RemoteDashboardModel: ObservableObject {
                 ?? (hasLegacyGlobalSettings
                     ? .migrating(self.mapping, voiceFnTap: defaults.bool(forKey: SettingsKeys.voiceFnTap))
                     : .defaults(for: remoteProfile))
-            globalButtons = globalButtons.normalized(for: remoteProfile)
+            globalButtons = globalButtons.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
             mouseSettings = mouseSettings.normalized(for: remoteProfile, globals: globalButtons)
             isRestoringRemoteConfiguration = false
             settingsWrites.save(globalButtons, SettingsKeys.Stored.globalButtons)
@@ -358,7 +374,7 @@ final class RemoteDashboardModel: ObservableObject {
             restoreRemoteKeyConfiguration(remoteKeyConfigurations[profile.id])
             normalizeProfiles(migrateLegacy: false, defaultMapping: .defaults(for: profile, macros: macros))
             restoreKeySelection()
-            globalButtons = globalButtons.normalized(for: profile)
+            globalButtons = globalButtons.normalized(for: profile, voiceTapAvailable: profile.supportsVoiceTap || !useRemoteMicrophone)
             isRestoringRemoteConfiguration = false
             if !profile.inputs.contains(selectedInput) { selectedInput = .buttonA }
             defaults.set(profile.id, forKey: SettingsKeys.selectedRemoteProfileID)
@@ -407,7 +423,7 @@ final class RemoteDashboardModel: ObservableObject {
         case .idle: outputDevices.contains(where: { $0.id == outputUID }) ? "设备可用" : "等待音频设备"
         }
     }
-    var effectiveMapping: RemoteMapping { globalButtons.applying(to: mapping, profile: remoteProfile) }
+    var effectiveMapping: RemoteMapping { globalButtons.applying(to: mapping, profile: remoteProfile, voiceTapAvailable: voiceTapAvailable) }
 
     func isGlobalInput(_ input: ControllerInput) -> Bool {
         globalButtons.buttons.contains { $0.input == input }
@@ -440,7 +456,7 @@ final class RemoteDashboardModel: ObservableObject {
         }
         var settings = globalButtons
         settings.buttons[index].input = input
-        globalButtons = settings.normalized(for: remoteProfile)
+        globalButtons = settings.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
     }
 
     func addGlobalButton() {
@@ -454,11 +470,11 @@ final class RemoteDashboardModel: ObservableObject {
               globalButtons.buttons.indices.contains(index) else { return }
         var settings = globalButtons
         settings.buttons.remove(at: index)
-        globalButtons = settings.normalized(for: remoteProfile)
+        globalButtons = settings.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
     }
 
     func setGlobalButtons(_ settings: GlobalButtonSettings) {
-        let normalized = settings.normalized(for: remoteProfile)
+        let normalized = settings.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
         guard normalized != globalButtons else { return }
         setup.resetEvidence()
         globalButtons = normalized
@@ -753,7 +769,7 @@ final class RemoteDashboardModel: ObservableObject {
         selectedHarnessID = configuration?.selectedHarnessID
         globalButtons = configuration?.globalButtons ?? .defaults(for: remoteProfile)
         mouseSettings = (configuration?.mouseSettings ?? RemoteMouseSettings())
-            .normalized(for: remoteProfile, globals: globalButtons.normalized(for: remoteProfile))
+            .normalized(for: remoteProfile, globals: globalButtons.normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable))
         harnesses = harnesses.map { harness in
             // Configuration IDs have already been migrated. Migrate the app
             // metadata before looking up bindings and initialization intent.
@@ -794,7 +810,8 @@ final class RemoteDashboardModel: ObservableObject {
         phrases = backup.phrases
         phraseAssignments = backup.phraseAssignments ?? PhraseAssignments()
         harnesses = backup.harnesses ?? HarnessConfiguration.defaults
-        globalButtons = backup.globalButtons ?? .defaults(for: remoteProfile)
+        globalButtons = (backup.globalButtons ?? .defaults(for: remoteProfile))
+            .normalized(for: remoteProfile, voiceTapAvailable: voiceTapAvailable)
         let current = remoteKeyConfigurations[remoteProfile.id]
         mouseSettings = (current?.mouseSettings ?? RemoteMouseSettings())
             .normalized(for: remoteProfile, globals: globalButtons)
@@ -1122,7 +1139,7 @@ final class RemoteDashboardModel: ObservableObject {
         postNotice("诊断信息已复制", level: .success)
     }
     var diagnosticsText: String {
-        "RcHarness \(AppInfo.version) (\(AppInfo.build))\nRemoteModel=\(remoteProfile.model)\nValidation=\(remoteProfile.validation.rawValue)\nBluetooth=\(bluetoothGranted)\nInputMonitoring=\(inputGranted)\nAccessibility=\(accessibilityGranted)\nMicrophone=\(microphoneGranted)\nRemoteConnected=\(isConnected)\nVoiceReady=\(voiceReady)\nOutputUID=\(outputUID)\nAudioOutput=\(audioOutputState)\nMicrophoneComponent=\(microphoneInstalled)\(microphoneUpdateAvailable ? " (update available)" : "")\n\(voiceDiagnostics)"
+        "RcHarness \(AppInfo.version) (\(AppInfo.build))\nRemoteModel=\(remoteProfile.model)\nValidation=\(remoteProfile.validation.rawValue)\nBluetooth=\(bluetoothGranted)\nInputMonitoring=\(inputGranted)\nAccessibility=\(accessibilityGranted)\nMicrophone=\(microphoneGranted)\nRemoteConnected=\(isConnected)\nVoiceReady=\(voiceReady)\nUseRemoteMicrophone=\(useRemoteMicrophone)\nOutputUID=\(outputUID)\nAudioOutput=\(audioOutputState)\nMicrophoneComponent=\(microphoneInstalled)\(microphoneUpdateAvailable ? " (update available)" : "")\n\(voiceDiagnostics)"
     }
     func copy(_ text: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string) }
 }

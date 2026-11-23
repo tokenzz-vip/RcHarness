@@ -12,6 +12,27 @@ private final class UnsupportedDesktopController: DesktopController {
 
 @MainActor
 final class InputAndAudioTests: XCTestCase {
+    func testDisabledOutputDropsRemoteAudioAndClearsBufferedPlayback() {
+        let playback = Playback()
+        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        output.begin()
+        output.append([1, 2, 3])
+        XCTAssertEqual(playback.packets, [[1, 2, 3]])
+
+        output.setEnabled(false)
+        output.append([4, 5, 6])
+        output.begin()
+        output.append([7, 8, 9])
+        XCTAssertEqual(playback.packets, [[1, 2, 3]])
+        XCTAssertEqual(output.queuedSamples, 0)
+
+        output.setEnabled(true)
+        output.begin()
+        output.append([10])
+        XCTAssertEqual(playback.packets, [[1, 2, 3], [10]])
+        output.stop()
+    }
+
     func testInstanceLockExcludesAnotherProcessAndReleasesOnExit() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -52,6 +52,7 @@ enum RemoteHIDUsages {
 
 final class XiaomiRemoteHIDParser {
     private let profile: RemoteProfile
+    var voiceTapAvailable = false
     var voiceMode: VoiceTriggerMode = .hold
     private let bindings: [UInt64: ControllerInput]
     private var active: [UInt64: Set<ControllerInput>] = [:]
@@ -76,7 +77,7 @@ final class XiaomiRemoteHIDParser {
         }
         // On-request firmware may expose Voice Command independently of the
         // audio stream. Keep the verified hold parser unchanged.
-        let tapVoice: ControllerInput? = profile.supportsVoiceTap && voiceMode == .tap
+        let tapVoice: ControllerInput? = (profile.supportsVoiceTap || voiceTapAvailable) && voiceMode == .tap
             && usagePage == 0x0C && usage == 0xCF ? .options : nil
         guard let input = bindings[source] ?? tapVoice ?? active[source]?.first else { return [] }
         if value != 0 {
@@ -140,10 +141,16 @@ final class XiaomiRemoteHIDManager {
     private let volumeGuard: any RemoteVolumeGuarding
     private var operationMode: ControllerOperationMode = .mapping
     private var voiceMode: VoiceTriggerMode = .hold
+    private var voiceTapAvailable = false
 
     func setVoiceMode(_ mode: VoiceTriggerMode) {
         voiceMode = mode
         parsers.values.forEach { $0.voiceMode = mode }
+    }
+
+    func setVoiceTapAllowed(_ allowed: Bool) {
+        voiceTapAvailable = allowed
+        parsers.values.forEach { $0.voiceTapAvailable = allowed }
     }
 
     init(profiles: [RemoteProfile] = RemoteProfiles.all,
@@ -318,6 +325,7 @@ final class XiaomiRemoteHIDManager {
         guard connectedDevices.insert(id).inserted else { return }
         parsers[id] = XiaomiRemoteHIDParser(profile: profile)
         parsers[id]?.voiceMode = voiceMode
+        parsers[id]?.voiceTapAvailable = voiceTapAvailable
         Log.hid.info("Remote HID accepted model=\(deviceModel ?? "BLE confirmed", privacy: .public) profile=\(profile.id, privacy: .public)")
         volumeGuard.update(mapping: operationMode == .mapping)
         // The guard keeps retrying until the corresponding event service is ready.

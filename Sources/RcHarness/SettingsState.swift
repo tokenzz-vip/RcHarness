@@ -242,8 +242,10 @@ struct GlobalButtonSettings: Codable, Equatable {
             .normalized(for: profile)
     }
 
-    func normalized(for profile: RemoteProfile = RemoteProfiles.xiaomiRC003) -> Self {
+    func normalized(for profile: RemoteProfile = RemoteProfiles.xiaomiRC003,
+                    voiceTapAvailable: Bool? = nil) -> Self {
         var result = self
+        let voiceTapAvailable = voiceTapAvailable ?? profile.supportsVoiceTap
         if result.buttons.isEmpty {
             result.buttons = [GlobalButtonEntry(input: .power,
                                                 single: ButtonMapping(action: .openHarnessSwitcher),
@@ -282,7 +284,7 @@ struct GlobalButtonSettings: Codable, Equatable {
         // The old Fn start/stop-tap switch is unrelated to latch-to-talk.
         result.voiceFnTap = false
         result.voiceTapShortcut = VoiceShortcutChoice.normalized(result.voiceTapShortcut, mode: .tap)
-        if result.voiceMode == nil || !profile.supportsVoiceTap { result.voiceMode = .hold }
+        if result.voiceMode == nil || !voiceTapAvailable { result.voiceMode = .hold }
         return result
     }
 
@@ -292,8 +294,9 @@ struct GlobalButtonSettings: Codable, Equatable {
              long: ButtonMapping(action: .disabled), voice: mapping[.options], voiceFnTap: voiceFnTap)
     }
 
-    func applying(to mapping: RemoteMapping, profile: RemoteProfile = RemoteProfiles.xiaomiRC003) -> RemoteMapping {
-        let settings = normalized(for: profile)
+    func applying(to mapping: RemoteMapping, profile: RemoteProfile = RemoteProfiles.xiaomiRC003,
+                  voiceTapAvailable: Bool? = nil) -> RemoteMapping {
+        let settings = normalized(for: profile, voiceTapAvailable: voiceTapAvailable)
         var result = mapping
         for button in settings.buttons {
             guard let input = button.input else { continue }

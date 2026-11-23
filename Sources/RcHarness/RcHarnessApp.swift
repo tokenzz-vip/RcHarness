@@ -9,6 +9,11 @@ extension Notification.Name {
 
 @MainActor
 final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+    static func shouldRouteTapThroughRemoteVoice(input: ControllerInput, voiceMode: VoiceTriggerMode,
+                                                 applicationSwitcherPresented: Bool) -> Bool {
+        input == .options && voiceMode == .tap && !applicationSwitcherPresented
+    }
+
     private var hid = XiaomiRemoteHIDManager()
     private var settingsDefaults: UserDefaults = .standard
     private lazy var voice = XiaomiRemoteVoice(defaults: settingsDefaults)
@@ -40,11 +45,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         self?.sender.typeText(text)
     }
     private var macroWork: [DispatchWorkItem] = []
-    private lazy var voiceSession = RemoteVoiceSessionController(output: microphone) { [weak self] mapping, pressed in
-        if let shortcut = mapping.shortcutForVoice {
-            self?.sender.sendShortcut(shortcut, pressed: pressed)
+    private lazy var voiceSession = RemoteVoiceSessionController(output: microphone,
+        shouldRouteRemoteAudio: { [weak self] in self?.dashboardModel?.useRemoteMicrophone == true }) { [weak self] mapping, pressed in
+            if let shortcut = mapping.shortcutForVoice {
+                self?.sender.sendShortcut(shortcut, pressed: pressed)
+            }
         }
-    }
     private var mode: ControllerOperationMode = .mapping
     private var inputPermissionsWereReady = false
     private var statusItem: NSStatusItem!
@@ -72,12 +78,15 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         // The legacy per-device mapping only seeds the default profile on first launch.
         let initialMapping = RemoteMapping.legacy(profileID: RemoteProfiles.xiaomiRC003.id, defaults: settingsDefaults) ?? .defaults
         dashboardModel = RemoteDashboardModel(mapping: initialMapping, defaults: settingsDefaults)
+        microphone.setEnabled(dashboardModel.useRemoteMicrophone)
         NSApp.appearance = dashboardModel.themeMode.appearance
         dashboardModel.onThemeModeChange = { NSApp.appearance = $0.appearance }
         hid = XiaomiRemoteHIDManager(profiles: [dashboardModel.remoteProfile])
         voice = XiaomiRemoteVoice(profile: dashboardModel.remoteProfile, defaults: settingsDefaults)
-        voice.setVoiceMode(dashboardModel.voiceMode)
+        voice.setVoiceMode(dashboardModel.voiceMode, allowTap: dashboardModel.voiceTapAvailable)
+        voice.setRemoteAudioEnabled(dashboardModel.useRemoteMicrophone)
         hid.setVoiceMode(dashboardModel.voiceMode)
+        hid.setVoiceTapAllowed(dashboardModel.voiceTapAvailable)
         configureInput()
         statusMenu.item(withTag: 101)?.title = "RcHarness · \(dashboardModel.remoteProfile.model)"
         mapping = dashboardModel.effectiveMapping
@@ -111,11 +120,14 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         }
         dashboardModel.onVoiceTriggerChange = { [weak self] in
             self?.heldVoiceInput = nil
+            self?.microphone.setEnabled(self?.dashboardModel?.useRemoteMicrophone == true)
             self?.voiceSession.cancel()
             self?.voice.cancelActiveStream()
             if let self {
-                self.voice.setVoiceMode(self.dashboardModel.voiceMode)
+                self.voice.setVoiceMode(self.dashboardModel.voiceMode, allowTap: self.dashboardModel.voiceTapAvailable)
+                self.voice.setRemoteAudioEnabled(self.dashboardModel.useRemoteMicrophone)
                 self.hid.setVoiceMode(self.dashboardModel.voiceMode)
+                self.hid.setVoiceTapAllowed(self.dashboardModel.voiceTapAvailable)
             }
         }
         dashboardModel.onGainChange = { [weak self] in self?.voice.gainDB = Float($0) }
@@ -130,7 +142,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         }
         if RemoteMicrophoneOutput.installed,
            dashboardModel.microphoneGranted,
-           dashboardModel.outputDevices.contains(where: { $0.id == dashboardModel.outputUID }) {
+           dashboardModel.useRemoteMicrophone {
             // Build the Core Audio graph before the first voice press. The
             // loopback driver adds no intentional device latency, so this work
             // belongs in idle time rather than on the first audio packet.
@@ -232,8 +244,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             guard let self, self.remoteSelectionRevision == revision else { return }
             self.hid = XiaomiRemoteHIDManager(profiles: [profile])
             self.voice = XiaomiRemoteVoice(profile: profile, defaults: self.settingsDefaults)
-            self.voice.setVoiceMode(self.dashboardModel.voiceMode)
+            self.voice.setVoiceMode(self.dashboardModel.voiceMode, allowTap: self.dashboardModel.voiceTapAvailable)
+            self.voice.setRemoteAudioEnabled(self.dashboardModel.useRemoteMicrophone)
             self.hid.setVoiceMode(self.dashboardModel.voiceMode)
+            self.hid.setVoiceTapAllowed(self.dashboardModel.voiceTapAvailable)
             self.voice.gainDB = Float(self.dashboardModel.gain)
             self.voice.enabled = self.mode == .mapping
             self.configureInput()
@@ -405,7 +419,11 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             self.updateStatusItem()
         }
         hid.onButtonInput = { [weak self] input, pressed in
-            if input == .options, self?.voice.voiceMode == .tap, self?.applicationSwitcher.isPresented != true {
+            if Self.shouldRouteTapThroughRemoteVoice(
+                input: input,
+                voiceMode: self?.voice.voiceMode ?? .hold,
+                applicationSwitcherPresented: self?.applicationSwitcher.isPresented == true
+            ) {
                 self?.voice.receiveTapButton(pressed: pressed)
                 return
             }
@@ -488,6 +506,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             heldVoiceInput = nil
             voiceStopInputs.insert(input)
             voice.releaseRemappedPress()
+            observeHostMicrophoneVoice(.ended)
             return
         }
         let phraseConsumed = phrasePicker.model.handle(input, pressed: pressed)
@@ -507,6 +526,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             if heldVoiceInput == input {
                 heldVoiceInput = nil
                 voiceSession.release()
+                if dashboardModel.voiceMode == .hold { observeHostMicrophoneVoice(.ended) }
             } else {
                 gestures.handle(input, pressed: false, mapping: mapping)
             }
@@ -540,6 +560,16 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             voice.prepareForPress(requestMicrophone: false)
             voiceSession.press(mapping: mapping[.options], fnTap: false, toggle: dashboardModel.voiceMode == .tap,
                                endToggleWithStream: dashboardModel.voiceMode == .tap)
+            observeHostMicrophoneVoice(.started)
+        }
+    }
+
+    private func observeHostMicrophoneVoice(_ event: RemoteVoiceStreamEvent) {
+        guard !dashboardModel.useRemoteMicrophone else { return }
+        dashboardModel.setup.observeVoice(event)
+        switch event {
+        case .started: dashboardModel.setStreaming(true)
+        case .ended, .cancelled: dashboardModel.setStreaming(false)
         }
     }
 

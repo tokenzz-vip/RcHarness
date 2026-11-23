@@ -286,13 +286,17 @@ struct SetupView: View {
     private var audio: some View {
         VStack(spacing: SettingsStyle.Spacing.groups) {
             SettingsPanel("虚拟麦克风组件", symbol: "mic") {
-                status("RcHarness 麦克风", ready: model.microphoneInstalled && !model.microphoneUpdateAvailable,
-                       pending: model.microphoneOperationInProgress ? "正在处理…" : model.microphoneUpdateAvailable ? "需要更新" : "未就绪")
+                if !model.useRemoteMicrophone {
+                    Text("当前未使用遥控器麦克风，无需安装 RcHarness 虚拟麦克风组件。")
+                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                status("RcHarness 麦克风", ready: !model.useRemoteMicrophone || (model.microphoneInstalled && !model.microphoneUpdateAvailable),
+                       pending: !model.useRemoteMicrophone ? "未使用遥控器麦克风" : model.microphoneOperationInProgress ? "正在处理…" : model.microphoneUpdateAvailable ? "需要更新" : "未就绪")
                 Text("如果还没有可用的回环设备，请安装随应用提供的麦克风组件。")
                     .font(.system(size: 13)).foregroundStyle(.secondary)
                 Button(model.microphoneUpdateAvailable ? "更新麦克风组件…" : model.microphoneComponentPresent ? "重新安装麦克风组件…" : "安装麦克风组件…") {
                     model.installMicrophone()
-                }.disabled(model.microphoneOperationInProgress)
+                }.disabled(!model.useRemoteMicrophone || model.microphoneOperationInProgress)
                 if model.microphoneOperationInProgress { ProgressView().controlSize(.small) }
             }
             SettingsPanel("选择接收设备", symbol: "waveform") {
@@ -315,7 +319,12 @@ struct SetupView: View {
     private var voice: some View {
         VStack(spacing: SettingsStyle.Spacing.groups) {
             SettingsPanel("语音触发方式", symbol: "keyboard") {
-                if model.remoteProfile.supportsVoiceTap {
+                Toggle("使用遥控器麦克风", isOn: $model.useRemoteMicrophone)
+                Text(model.useRemoteMicrophone
+                     ? "使用遥控器麦克风，并在语音工具中选择 RcHarness 遥控器麦克风。"
+                     : "关闭后使用其他麦克风，需在语音工具内做调整。")
+                    .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary)
+                if model.voiceTapAvailable {
                     Picker("触发方式", selection: Binding(get: { model.voiceMode }, set: { model.voiceMode = $0 })) {
                         Text("按住说话").tag(VoiceTriggerMode.hold)
                         Text("点按开始 / 结束").tag(VoiceTriggerMode.tap)
@@ -327,12 +336,12 @@ struct SetupView: View {
                 ))
                 Text(model.voiceMode == .hold ? "在语音工具中，把“按住说话”快捷键设为上方按键。" : "在语音工具中，把“点按开始 / 结束”快捷键设为上方按键。")
                     .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
-                Text("实体语音键仍需按住才能收音；点按模式调整的是目标工具的快捷键触发方式。")
+                Text(model.useRemoteMicrophone ? "点按模式会让遥控器麦克风持续收音，第二次按键结束。" : "目标工具使用其他麦克风，请在语音工具内做调整。")
                     .font(SettingsStyle.Typography.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             SettingsPanel("在输入工具中检查", symbol: "checklist") {
                 Text("1. 打开\(Text("输入法").foregroundColor(.red).bold())或听写工具的语音设置。")
-                Text("2. 麦克风选择“\(receiverName)”。")
+                Text(model.useRemoteMicrophone ? "2. 麦克风选择“\(receiverName)”。" : "2. 在语音工具内选择要使用的麦克风。")
                 Text("3. 设置相同的快捷键和触发方式。")
                 Text("使用 Fn / 地球键时，检查系统键盘设置中该按键的用途，避免同时触发系统动作。")
                     .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -347,11 +356,14 @@ struct SetupView: View {
     private var trial: some View {
         VStack(spacing: SettingsStyle.Spacing.groups) {
             SettingsPanel("说一句话，检查整条链路", symbol: "waveform") {
-                Text("在目标应用中点击文本输入框，按住遥控器语音键说“用遥控器开始工作”，松开结束。确认文字出现后，返回这里。")
+                Text(model.useRemoteMicrophone
+                     ? "在目标应用中点击文本输入框，按住遥控器语音键说“用遥控器开始工作”，松开结束。确认文字出现后，返回这里。"
+                     : "在目标应用中点击文本输入框，按住遥控器语音键说“用遥控器开始工作”，松开结束。请在语音工具内选择要使用的麦克风。")
                     .font(.system(size: 13)).fixedSize(horizontal: false, vertical: true)
                 Divider()
                 status("语音会话已开始", ready: setup.voiceStarted, pending: "等待按下语音键")
-                status("收到遥控器音频", ready: setup.voiceSamplesReceived, pending: "等待音频")
+                status("收到遥控器音频", ready: !model.useRemoteMicrophone || setup.voiceSamplesReceived,
+                       pending: model.useRemoteMicrophone ? "等待遥控器音频" : "由输入法选择的麦克风收音")
                 status("语音会话已结束", ready: setup.voiceEnded, pending: "等待松开语音键")
                 status("音频输出", ready: readiness.audio && readiness.outputHealthy, pending: model.audioOutputDescription)
                 Toggle("已在目标应用中确认语音输入正常", isOn: $setup.transcriptConfirmed)

@@ -6,6 +6,7 @@ import Foundation
 enum SettingsKeys {
     static let outputUID = "RcHarness.outputUID"
     static let gain = "RcHarness.gain"
+    static let useRemoteMicrophone = "RcHarness.useRemoteMicrophone"
     static let voiceFnTap = "RcHarness.voiceFnTap"
     static let showDockIcon = "RcHarness.showDockIcon"
     static let showKeyProfilePrefix = "RcHarness.showKeyProfilePrefix"

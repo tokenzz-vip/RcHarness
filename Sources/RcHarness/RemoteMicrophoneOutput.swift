@@ -76,6 +76,7 @@ final class RemoteMicrophoneOutput {
     private var drainCompletion: DispatchWorkItem?
     private(set) var deliveredSamples = 0
     private(set) var droppedSamples = 0
+    private(set) var enabled = true
     private(set) var failure: String? {
         didSet { if let failure { state = .failed(failure) } }
     }
@@ -154,6 +155,7 @@ final class RemoteMicrophoneOutput {
     }
 
     func begin() {
+        guard enabled else { return }
         let pendingReleases = startReleaseTimeout != nil ? drainCompletions : []
         if startReleaseTimeout != nil { drainCompletions.removeAll() }
         startReleaseTimeout?.cancel()
@@ -190,7 +192,7 @@ final class RemoteMicrophoneOutput {
     }
 
     func append(_ pcm: [Int16]) {
-        guard accepting, playback != nil || recoveryWork != nil, !pcm.isEmpty else { return }
+        guard enabled, accepting, (playback != nil || recoveryWork != nil), !pcm.isEmpty else { return }
         // Keep a cold graph's first sentence until it catches up. Applying the
         // live half-second limit here used to discard almost all initial speech.
         let scheduledSamples = queuedSamples - bufferedPCM.count
@@ -465,6 +467,12 @@ final class RemoteMicrophoneOutput {
         if draining || !drainCompletions.isEmpty { stop() }
         buttonPressed = true
         buttonGeneration = accepting || draining ? generation : nil
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        guard self.enabled != enabled else { return }
+        self.enabled = enabled
+        if !enabled { stop() }
     }
 
     func stop() {

@@ -23,7 +23,9 @@ struct PermissionsPanel: View {
                 openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             }
             Divider()
-            permissionRow("麦克风", detail: "将遥控器语音写入回环设备", symbol: "mic", granted: model.microphoneGranted) {
+            permissionRow("麦克风", detail: model.useRemoteMicrophone ? "将遥控器语音写入回环设备" : "当前使用目标工具选择的麦克风",
+                          symbol: "mic", granted: !model.useRemoteMicrophone || model.microphoneGranted) {
+                guard model.useRemoteMicrophone else { return }
                 if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
                     AVCaptureDevice.requestAccess(for: .audio) { _ in DispatchQueue.main.async { model.refreshPermissions() } }
                 } else { openSystemSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") }

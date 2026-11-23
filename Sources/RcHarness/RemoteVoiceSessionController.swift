@@ -51,6 +51,7 @@ final class RemoteVoiceSessionController {
     }
 
     private let output: RemoteVoiceAudioOutput
+    private let shouldRouteRemoteAudio: () -> Bool
     private let sendKey: (ButtonMapping, Bool) -> Void
     private let schedule: Scheduler
     private let logger: (String) -> Void
@@ -67,10 +68,12 @@ final class RemoteVoiceSessionController {
 
     init(output: RemoteVoiceAudioOutput, schedule: @escaping Scheduler = mainQueue,
          logger: @escaping (String) -> Void = AudioDiagnostics.log,
+         shouldRouteRemoteAudio: @escaping () -> Bool = { true },
          sendKey: @escaping (ButtonMapping, Bool) -> Void) {
         self.output = output
         self.schedule = schedule
         self.logger = logger
+        self.shouldRouteRemoteAudio = shouldRouteRemoteAudio
         self.sendKey = sendKey
     }
 
@@ -94,7 +97,12 @@ final class RemoteVoiceSessionController {
         if session.toggle { return }
         session.released = true
         log(session, "release")
-        if current === session, session.outputActive { registerDrain(session) }
+        if current === session, session.outputActive {
+            registerDrain(session)
+        } else if current === session, !shouldRouteRemoteAudio() {
+            session.finishRequested = true
+            closeTarget(session)
+        }
     }
 
     /// A stop press is consumed by the input router, including its release.
@@ -188,9 +196,11 @@ final class RemoteVoiceSessionController {
     private func activateIfPossible() {
         guard let session = current, let mapping = session.mapping,
               !session.outputActive, !session.finishRequested, !session.cancelled, !session.closed else { return }
-        session.outputActive = true
-        output.prepareForPress()
-        output.begin()
+        session.outputActive = shouldRouteRemoteAudio()
+        if session.outputActive {
+            output.prepareForPress()
+            output.begin()
+        }
         // A synchronous preparation failure may cancel this session.
         guard current === session, !session.closed, !session.cancelled else { return }
         if session.tap {

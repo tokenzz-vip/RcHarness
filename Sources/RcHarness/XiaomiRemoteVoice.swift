@@ -44,6 +44,8 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
     private var lastTapSource: TapSource?
     private var lastTapAt = -Double.infinity
     private(set) var voiceMode: VoiceTriggerMode = .hold
+    private var voiceTapAvailable = false
+    private var remoteAudioEnabled = true
     private var startReason: UInt8?
     private var stopReason: UInt8?
     private var identity: RemoteVoiceIdentity
@@ -137,13 +139,24 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
         super.init()
     }
 
-    func setVoiceMode(_ mode: VoiceTriggerMode) {
-        let normalized: VoiceTriggerMode = profile.supportsVoiceTap ? mode : .hold
-        guard voiceMode != normalized else { return }
+    func setVoiceMode(_ mode: VoiceTriggerMode, allowTap: Bool = false) {
+        let allowanceChanged = voiceTapAvailable != allowTap
+        voiceTapAvailable = allowTap
+        let normalized: VoiceTriggerMode = (profile.supportsVoiceTap || allowTap) ? mode : .hold
+        guard voiceMode != normalized || allowanceChanged else { return }
         let restart = wanted
         if restart { stop() } else { closeMicrophone() }
         voiceMode = normalized
         if restart { start() }
+    }
+
+    /// Point-to-talk can be driven by the HID voice key while the target tool
+    /// records from the Mac's own microphone. In that mode the remote's BLE
+    /// audio stream must not participate in the gesture or its startup timer.
+    func setRemoteAudioEnabled(_ enabled: Bool) {
+        guard remoteAudioEnabled != enabled else { return }
+        remoteAudioEnabled = enabled
+        if !enabled { closeMicrophone() }
     }
 
     private func report(_ text: String) {
@@ -189,6 +202,11 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
 
     func releaseRemappedPress() {
         remappedPressReleased = true
+        if !remoteAudioEnabled {
+            tapPhase = .idle
+            sessionGate.stop(cancelled: true, at: now())
+            return
+        }
         if voiceMode == .tap {
             guard tapPhase == .opening || tapPhase == .streaming else { return }
             tapPhase = .stopping
@@ -216,7 +234,7 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
     /// BLE native START/STOP owns the gesture when available. HID-only
     /// devices complete their click on release; defer it to merge BLE reports.
     func receiveTapButton(pressed: Bool) {
-        guard voiceMode == .tap, enabled, isReady else { return }
+        guard voiceMode == .tap, enabled, (isReady || !remoteAudioEnabled) else { return }
         if pressed { tapHIDDown = true; return }
         guard tapHIDDown else { return }
         tapHIDDown = false
@@ -324,7 +342,7 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
     /// so protocol tests can exercise the production receive path.
     func requestCapabilities() {
         requestedCapabilities = true
-        write(profile.voiceCapabilitiesRequest(mode: voiceMode))
+        write(profile.voiceCapabilitiesRequest(mode: voiceMode, tapAllowed: voiceTapAvailable))
     }
 
     private func closeMicrophone() {
@@ -420,6 +438,18 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
         let lifecycle = [UInt8(0x00), 0x04, 0x08, 0x0B, 0x0C].contains(opcode)
         let argument = lifecycle ? bytes.dropFirst().prefix(8).map { String(format: "%02x", $0) }.joined(separator: ":") : "omitted"
         AudioDiagnostics.log("[RcHarness] Remote voice control opcode=\(String(format: "0x%02x", opcode)) bytes=\(bytes.count) argument=\(argument) phase=\(String(describing: tapPhase))")
+        if !remoteAudioEnabled {
+            switch opcode {
+            case 0x04 where voiceMode == .tap:
+                guard bytes.count >= 4, bytes[1] == 3 else { return }
+                receiveTap(source: .native)
+                return
+            case 0x00, 0x08, 0x0C:
+                return
+            default:
+                break
+            }
+        }
         if opcode == 0x0B {
             guard requestedCapabilities, !isReady, let caps = RemoteVoiceCapabilities(data) else {
                 report("遥控器语音协议不受支持")
@@ -513,14 +543,25 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
         onCaptureFailure?(message)
     }
 
-    /// Native HTT capture is left running until release. A second native
-    /// press may replace a host-opened stream without ending the input method.
+    /// Native HTT capture is left running until release. A second native press
+    /// first ends a host-opened target session, then falls back to stream
+    /// replacement when no target session consumes the edge.
     private func receiveTapStart(reason: UInt8, session: UInt8) {
         startReason = reason
         if reason == 3 {
             guard tapPress?.session != session else { return }
             guard tapPhase != .stopping else { write([0x0D, session]); return }
             let wasOpen = tapPhase != .idle
+            if wasOpen {
+                // A native second click is the stop edge for a host-opened
+                // tap session. Give the active target session first chance to
+                // consume it before treating the notification as a new stream.
+                lastTapAt = now()
+                lastTapSource = .native
+                onVoiceButtonInput?(true)
+                onVoiceButtonInput?(false)
+                if tapPhase == .stopping { return }
+            }
             let accepted = wasOpen || beginTapCapture()
             tapPress = TapPress(session: session, began: now(), wasOpen: wasOpen, accepted: accepted)
             lastTapAt = now()
@@ -611,6 +652,17 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
         guard elapsed >= 0.05 else { return }
         lastTapAt = now()
         lastTapSource = source
+        if !remoteAudioEnabled {
+            if tapPhase == .idle {
+                guard beginTapCapture() else { return }
+                tapPhase = .streaming
+            } else {
+                onVoiceButtonInput?(true)
+                onVoiceButtonInput?(false)
+                tapPhase = .idle
+            }
+            return
+        }
         if tapPhase == .idle {
             guard beginTapCapture() else { return }
             armTapStartup()
@@ -743,7 +795,7 @@ final class XiaomiRemoteVoice: NSObject, @preconcurrency CBCentralManagerDelegat
     }
 
     func receiveAudio(_ data: Data) {
-        guard enabled, isReady, !data.isEmpty, let capabilities else { return }
+        guard remoteAudioEnabled, enabled, isReady, !data.isEmpty, let capabilities else { return }
         if voiceMode == .tap {
             guard tapPhase == .streaming || tapPhase == .stopping, stream.session != nil else { return }
         }

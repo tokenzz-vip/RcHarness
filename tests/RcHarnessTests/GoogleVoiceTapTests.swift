@@ -3,6 +3,55 @@ import XCTest
 
 @MainActor
 final class GoogleVoiceTapTests: XCTestCase {
+    func testTapWithHostMicrophoneUsesHIDOnlyAndDoesNotWaitForRemoteAudio() {
+        let h = Harness(profile: RemoteProfiles.xiaomiRC003)
+        h.routeRemoteAudio = false
+        h.voice.setRemoteAudioEnabled(false)
+
+        h.voice.receiveTapButton(pressed: true)
+        h.voice.receiveTapButton(pressed: false)
+        h.clock.advance(0.05)
+        XCTAssertEqual(h.keys, [true])
+        XCTAssertTrue(h.failures.isEmpty)
+
+        h.voice.receiveTapButton(pressed: true)
+        h.voice.receiveTapButton(pressed: false)
+        h.clock.advance(0.05)
+        h.clock.advance(0.24)
+        XCTAssertEqual(h.keys, [true, false, true, false])
+        XCTAssertFalse(h.commands.contains { $0.first == 0x0C })
+        XCTAssertTrue(h.failures.isEmpty)
+    }
+
+    func testTapWithHostMicrophoneUsesGoogleNativeVoiceEdgesWithoutAudio() {
+        let h = Harness()
+        h.routeRemoteAudio = false
+        h.voice.setRemoteAudioEnabled(false)
+
+        h.start(session: 1, reason: 3)
+        XCTAssertEqual(h.keys, [true])
+        h.clock.advance(0.3)
+        h.start(session: 2, reason: 3)
+        XCTAssertEqual(h.buttons, [true, false, true, false])
+        h.clock.advance(0.24)
+        XCTAssertEqual(h.keys, [true, false, true, false])
+        XCTAssertFalse(h.commands.contains { $0.first == 0x0C })
+        XCTAssertTrue(h.failures.isEmpty)
+    }
+
+    func testNativeOnlySecondClickClosesPersistentTapCapture() {
+        let h = Harness()
+        h.start(session: 49, reason: 3)
+        h.audio()
+        h.stop(reason: 2)
+        h.start(session: 50, reason: 3)
+        h.audio()
+        h.stop(reason: 2)
+        h.output.drain()
+        h.clock.advance(0.24)
+        XCTAssertEqual(h.keys, [true, false, true, false])
+    }
+
     func testNativeTapOpensOnlyAfterReleaseAndSecondTapEndsWithoutReopening() {
         let h = Harness()
         h.start(session: 26, reason: 3)
@@ -489,21 +538,26 @@ final class GoogleVoiceTapTests: XCTestCase {
         var buttons: [Bool] = []
         var failures: [String] = []
         var acceptPress = true
-        lazy var session = RemoteVoiceSessionController(output: output, schedule: clock.schedule, logger: { _ in }) {
+        var routeRemoteAudio = true
+        lazy var session = RemoteVoiceSessionController(output: output, schedule: clock.schedule,
+            logger: { _ in }, shouldRouteRemoteAudio: { [weak self] in self?.routeRemoteAudio ?? true }) {
             [weak self] _, down in self?.keys.append(down)
         }
         lazy var voice = XiaomiRemoteVoice(profile: RemoteProfiles.googleG9N9N, schedule: clock.schedule,
             now: { [unowned self] in self.clock.time }, commandWriter: { [weak self] in self?.commands.append($0) })
 
-        init(model: UInt8 = 0) {
-            voice.setVoiceMode(.tap)
+        init(model: UInt8 = 0, profile: RemoteProfile = RemoteProfiles.googleG9N9N) {
+            voice = XiaomiRemoteVoice(profile: profile, schedule: clock.schedule,
+                now: { [unowned self] in self.clock.time }, commandWriter: { [weak self] in self?.commands.append($0) })
+            voice.setVoiceMode(.tap, allowTap: profile.adapter == .xiaomi)
             voice.onCaptureFailure = { [weak self] in self?.failures.append($0) }
             voice.canStartCapture = { [unowned self] in self.session.isIdle }
             voice.onVoiceButtonInput = { [unowned self] down in
                 self.buttons.append(down)
                 if !down { self.session.release(); return }
                 guard self.acceptPress else { self.voice.cancelActiveStream(); return }
-                if self.session.finishToggle(waitForStreamEnd: true) {
+                let finished = self.session.finishToggle(waitForStreamEnd: true)
+                if finished {
                     self.voice.releaseRemappedPress()
                 } else {
                     self.voice.prepareForPress()

@@ -221,4 +221,21 @@ final class SetupFlowTests: XCTestCase {
         model.microphoneGranted = false
         XCTAssertFalse(model.setupReadiness.permissions)
     }
+
+    func testHostMicrophoneModeDoesNotRequireRcHarnessPermissionVoiceOrLoopback() {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        model.useRemoteMicrophone = false
+        model.bluetoothGranted = true
+        model.inputGranted = true
+        model.accessibilityGranted = true
+        model.microphoneGranted = false
+        model.isConnected = true
+        model.voiceReady = false
+        model.outputUID = "missing-loopback"
+        model.outputDevices = []
+
+        XCTAssertTrue(model.setupReadiness.permissions)
+        XCTAssertTrue(model.setupReadiness.remote)
+        XCTAssertTrue(model.setupReadiness.audio)
+    }
 }

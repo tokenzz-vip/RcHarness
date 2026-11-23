@@ -55,6 +55,7 @@ final class SetupFlow: ObservableObject {
     @Published private(set) var voiceEnded = false
     @Published var toolConfigured = false
     @Published var transcriptConfirmed = false
+    var usesRemoteMicrophone = true
     private let defaults: UserDefaults
     private var voiceActive = false
     /// Release active actions whenever the input routing policy changes.
@@ -128,7 +129,7 @@ final class SetupFlow: ObservableObject {
     }
 
     var allowsVoiceCapture: Bool { !isPresented || step == .test }
-    var voiceTestSucceeded: Bool { voiceStarted && voiceSamplesReceived && voiceEnded }
+    var voiceTestSucceeded: Bool { voiceStarted && (!usesRemoteMicrophone || voiceSamplesReceived) && voiceEnded }
 
     func observeVoice(_ event: RemoteVoiceStreamEvent) {
         guard isPresented, step == .test else { return }
@@ -138,7 +139,7 @@ final class SetupFlow: ObservableObject {
             voiceActive = true
             voiceStarted = true
         case .ended:
-            voiceEnded = voiceActive && voiceSamplesReceived
+            voiceEnded = voiceActive && (!usesRemoteMicrophone || voiceSamplesReceived)
             voiceActive = false
         case .cancelled:
             if voiceActive { resetVoiceTest() }
@@ -174,11 +175,12 @@ final class SetupFlow: ObservableObject {
 extension RemoteDashboardModel {
     var setupReadiness: SetupReadiness {
         SetupReadiness(
-            permissions: bluetoothGranted && inputGranted && accessibilityGranted && microphoneGranted,
-            remote: isConnected && voiceReady,
-            audio: outputDevices.contains { $0.id == outputUID }
+            permissions: bluetoothGranted && inputGranted && accessibilityGranted
+                && (!useRemoteMicrophone || microphoneGranted),
+            remote: isConnected && (!useRemoteMicrophone || voiceReady),
+            audio: !useRemoteMicrophone || (outputDevices.contains { $0.id == outputUID }
                 && (outputUID != RemoteMicrophoneOutput.deviceUID || (microphoneInstalled && !microphoneUpdateAvailable))
-                && !microphoneOperationInProgress,
+                && !microphoneOperationInProgress),
             outputHealthy: !audioOutputFailed
         )
     }
