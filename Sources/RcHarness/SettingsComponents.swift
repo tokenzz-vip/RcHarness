@@ -284,16 +284,14 @@ struct LivePressIndicator: View {
 
 struct ShortcutBindingEditor: View {
     @Binding var shortcut: RecordedShortcut?
-    @Binding var capturing: Bool
+    let onChooseKeyboard: (Binding<RecordedShortcut?>) -> Void
+    @State private var capturing = false
+    @State private var recordingAttempt = 0
+    @State private var progress: ShortcutRecordingSession.Progress = .waiting
 
-    init(shortcut: Binding<RecordedShortcut?>, capturing: Binding<Bool>) {
+    init(shortcut: Binding<RecordedShortcut?>, onChooseKeyboard: @escaping (Binding<RecordedShortcut?>) -> Void) {
         _shortcut = shortcut
-        _capturing = capturing
-    }
-
-    init(shortcut: Binding<RecordedShortcut>, capturing: Binding<Bool>) {
-        _shortcut = Binding(get: { shortcut.wrappedValue }, set: { if let value = $0 { shortcut.wrappedValue = value } })
-        _capturing = capturing
+        self.onChooseKeyboard = onChooseKeyboard
     }
 
     var body: some View {
@@ -301,18 +299,50 @@ struct ShortcutBindingEditor: View {
             HStack {
                 Text(shortcut?.label ?? "尚未设置快捷键").font(.system(size: 13, design: .monospaced))
                 Spacer()
+                Button("键盘选键") {
+                    capturing = false
+                    onChooseKeyboard($shortcut)
+                }
                 Button(capturing ? "取消录制" : "录制快捷键") {
+                    progress = .waiting
+                    if !capturing { recordingAttempt += 1 }
                     capturing.toggle()
                 }
             }
             if capturing {
-                Text("请按下并松开快捷键；离开窗口将取消录制。")
-                    .font(.caption).foregroundStyle(Color.accentColor).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text(recordingHint)
+                        .font(.caption).foregroundStyle(Color.accentColor).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    if progress != .waiting {
+                        Button("重新录制") {
+                            progress = .waiting
+                            recordingAttempt += 1
+                        }
+                        .font(.caption)
+                    }
+                }
+                let attempt = recordingAttempt
                 ShortcutCapture(onCapture: {
+                    guard capturing, recordingAttempt == attempt else { return }
                     shortcut = $0
                     capturing = false
-                }, onCancel: { capturing = false }).frame(height: 1)
+                }, onCancel: {
+                    if recordingAttempt == attempt { capturing = false }
+                }, onProgress: {
+                    if capturing, recordingAttempt == attempt { progress = $0 }
+                })
+                .id(attempt)
+                .frame(height: 1)
             }
+        }
+    }
+
+    private var recordingHint: String {
+        switch progress {
+        case .waiting: "请按下并松开快捷键；离开窗口将取消录制。"
+        case let .waitingForRelease(label): "已识别 \(label)，请松开按键。"
+        case .tooManyKeys: "一次只能录制一个主键，请松开后重试。"
         }
     }
 }
@@ -321,6 +351,7 @@ struct ShortcutBindingEditor: View {
 struct ShortcutCapture: NSViewRepresentable {
     var onCapture: (RecordedShortcut) -> Void
     var onCancel: () -> Void
+    var onProgress: (ShortcutRecordingSession.Progress) -> Void = { _ in }
 
     func makeNSView(context: Context) -> CaptureField {
         let view = CaptureField()
@@ -334,10 +365,13 @@ struct ShortcutCapture: NSViewRepresentable {
         // Deliver outside the AppKit event / view update stack. A removed recording
         // field must not overwrite a newer recording's state with a late result.
         view.session.onCapture = { [weak view] shortcut in
-            view?.deliverIfAttached { onCapture(shortcut) }
+            view?.completeRecording { onCapture(shortcut) }
         }
         view.onCancel = { [weak view] in
             view?.deliverIfAttached { onCancel() }
+        }
+        view.session.onProgress = { [weak view] progress in
+            view?.deliverIfAttached { onProgress(progress) }
         }
     }
 
@@ -348,6 +382,8 @@ struct ShortcutCapture: NSViewRepresentable {
         let session: ShortcutRecordingSession
         var onCancel: (() -> Void)?
         private var observers: [NSObjectProtocol] = []
+        private var keyMonitor: Any?
+        private var completed = false
         private var generation = 0
         override var acceptsFirstResponder: Bool { true }
 
@@ -381,6 +417,14 @@ struct ShortcutCapture: NSViewRepresentable {
                     return
                 }
                 self.session.start()
+                self.keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+                    let consumed = MainActor.assumeIsolated {
+                        guard let self, let window = self.window, window.isKeyWindow,
+                              event.window == nil || event.window === window else { return false }
+                        return self.receive(event)
+                    }
+                    return consumed ? nil : event
+                }
             }
         }
 
@@ -407,8 +451,17 @@ struct ShortcutCapture: NSViewRepresentable {
         func stopRecording() {
             generation += 1
             session.stop()
+            completed = false
+            removeKeyMonitor()
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
             observers.removeAll()
+        }
+
+        private func removeKeyMonitor() {
+            if let keyMonitor {
+                NSEvent.removeMonitor(keyMonitor)
+                self.keyMonitor = nil
+            }
         }
 
         func deliverIfAttached(_ action: @escaping () -> Void) {
@@ -419,12 +472,20 @@ struct ShortcutCapture: NSViewRepresentable {
             }
         }
 
+        func completeRecording(_ action: @escaping () -> Void) {
+            completed = true
+            removeKeyMonitor()
+            deliverIfAttached(action)
+        }
+
         private func cancelRecording() {
+            guard !completed else { return }
             stopRecording()
             onCancel?()
         }
 
         deinit {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             for observer in observers { NotificationCenter.default.removeObserver(observer) }
         }
     }

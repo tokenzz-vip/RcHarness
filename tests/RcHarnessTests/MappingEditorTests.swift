@@ -85,4 +85,25 @@ final class MappingEditorTests: XCTestCase {
         XCTAssertFalse(model.saveMappingEditor(draft))
         XCTAssertEqual(model.effectiveMapping, otherRemoteMapping)
     }
+
+    func testIncompleteShortcutBlocksNewChangesButAllowsLegacyMappings() {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        let blank = ButtonMapping(action: .recordedShortcut)
+        let input = ControllerInput.dpadDown
+        model.openButtonEditor(input)
+        let original = model.effectiveMapping
+        var draft = MappingEditorDraft(model: model)
+        draft.mapping[input, .long] = blank
+        draft.mapping[input, .single] = ButtonMapping(action: .copy)
+        XCTAssertTrue(draft.hasIncompleteShortcut)
+        XCTAssertFalse(model.saveMappingEditor(draft))
+        XCTAssertEqual(model.effectiveMapping, original)
+
+        model.update(blank, for: input, trigger: .long)
+        draft = MappingEditorDraft(model: model)
+        draft.mapping[input, .single] = ButtonMapping(action: .copy)
+        XCTAssertFalse(draft.hasIncompleteShortcut)
+        XCTAssertTrue(model.saveMappingEditor(draft))
+        XCTAssertEqual(model.effectiveMapping[input, .long], blank)
+    }
 }

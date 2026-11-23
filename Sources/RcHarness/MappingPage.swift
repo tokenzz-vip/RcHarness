@@ -406,6 +406,7 @@ struct MappingEditorSheet: View {
     @Binding var actionFilter: ActionFilter
 
     @State private var draft: MappingEditorDraft
+    @State private var keyboardShortcut: Binding<RecordedShortcut?>?
 
     init(model: RemoteDashboardModel, actionFilter: Binding<ActionFilter>) {
         self.model = model
@@ -414,11 +415,30 @@ struct MappingEditorSheet: View {
     }
 
     private var editedMapping: Binding<ButtonMapping> {
-        Binding(get: { draft.mapping[draft.input, draft.trigger] },
-                set: { draft.mapping[draft.input, draft.trigger] = $0 })
+        let trigger = draft.trigger
+        return Binding(get: { draft.mapping[draft.input, trigger] },
+                       set: { draft.mapping[draft.input, trigger] = $0 })
     }
 
     var body: some View {
+        Group {
+            if let shortcut = keyboardShortcut {
+                ShortcutKeyboardPicker(shortcut: shortcut.wrappedValue, onCancel: { keyboardShortcut = nil }) { selection in
+                    shortcut.wrappedValue = selection
+                    keyboardShortcut = nil
+                }
+            } else {
+                editor
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .onExitCommand {
+            if keyboardShortcut != nil { keyboardShortcut = nil }
+            else { model.editorVisible = false }
+        }
+    }
+
+    private var editor: some View {
         VStack(spacing: 0) {
             HStack(spacing: SettingsStyle.Spacing.controls) {
                 Image(systemName: draft.input.symbol)
@@ -465,7 +485,8 @@ struct MappingEditorSheet: View {
                             }
                             .pickerStyle(.segmented)
                         }
-                        ActionMappingEditor(value: editedMapping, model: model, filter: actionFilter)
+                        ActionMappingEditor(value: editedMapping, model: model, filter: actionFilter,
+                                            onChooseKeyboard: { keyboardShortcut = $0 })
                             .id(draft.trigger)
                     }
                 }
@@ -474,6 +495,11 @@ struct MappingEditorSheet: View {
             }
             Divider()
             HStack {
+                if draft.hasIncompleteShortcut {
+                    Text("请为所选触发方式设置快捷键。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("取消", role: .cancel) { model.editorVisible = false }
                     .keyboardShortcut(.cancelAction)
@@ -483,12 +509,16 @@ struct MappingEditorSheet: View {
                 }
                     .accessibilityIdentifier("mapping-editor-save")
                     .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                .disabled(draft.hasIncompleteShortcut)
             }
             .padding(.horizontal, SettingsStyle.pagePadding).padding(.vertical, 16)
         }
-        .frame(width: 560, height: draft.input == .options ? 560 : editedMapping.wrappedValue.action == .macro ? 460 : 420)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .onExitCommand { model.editorVisible = false }
+        .frame(width: 560, height: editorHeight)
+    }
+
+    private var editorHeight: CGFloat {
+        if draft.input == .options { return 560 }
+        return editedMapping.wrappedValue.action == .macro ? 460 : 420
     }
 
     private func voiceModeCard(_ mode: VoiceTriggerMode, title: String, detail: String, shortcut: Binding<RecordedShortcut>) -> some View {
@@ -655,7 +685,7 @@ struct ActionMappingEditor: View {
     @ObservedObject var model: RemoteDashboardModel
     var filter: ActionFilter
     var parentMacroID: UUID? = nil
-    @State private var capturing = false
+    let onChooseKeyboard: (Binding<RecordedShortcut?>) -> Void
     @State private var selectedMacroTagIDs: Set<String> = []
     private var actions: [RemoteAction] {
         let basic: [RemoteAction] = [.enter, .backspace, .rapidDelete, .escape, .arrowUp, .arrowDown, .arrowLeft, .arrowRight, .copy, .paste, .browserBack, .browserForward]
@@ -712,7 +742,9 @@ struct ActionMappingEditor: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             if value.action == .recordedShortcut {
-                ShortcutBindingEditor(shortcut: $value.shortcut, capturing: $capturing)
+                ShortcutBindingEditor(shortcut: Binding(get: { value.shortcut }, set: { shortcut in
+                    if value.action == .recordedShortcut { value.shortcut = shortcut }
+                }), onChooseKeyboard: onChooseKeyboard)
             }
             if value.action == .openApplication {
                 HStack {

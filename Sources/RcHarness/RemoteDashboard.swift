@@ -478,6 +478,10 @@ final class RemoteDashboardModel: ObservableObject {
             postNotice("当前遥控器或按键方案已切换，请取消后重新编辑。", level: .warning)
             return false
         }
+        if draft.hasIncompleteShortcut {
+            postNotice("请为选择了「录制的快捷键」的触发方式设置快捷键。", level: .warning)
+            return false
+        }
         settingsWrites.batch {
             if draft.input == .options {
                 var settings = globalButtons

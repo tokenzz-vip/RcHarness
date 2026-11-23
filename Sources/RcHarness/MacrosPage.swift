@@ -14,6 +14,7 @@ struct MacrosPage: View {
     @State private var showsTagManager = false
     @State private var stepScrollTarget: ScrollTarget?
     @State private var followsStepFooter = false
+    @State private var keyboardShortcut: Binding<RecordedShortcut?>?
 
     private var visibleMacros: [SavedMacro] {
         model.macros.filter { macro in
@@ -47,6 +48,7 @@ struct MacrosPage: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .onChange(of: selectedMacroID) { _, id in
+            keyboardShortcut = nil
             stepScrollTarget = nil
             followsStepFooter = false
             macroNameDraft = model.macros.first(where: { $0.id == id })?.name ?? ""
@@ -67,6 +69,7 @@ struct MacrosPage: View {
         .sheet(isPresented: $showsTagManager) {
             MacroTagManagementSheet(model: model)
         }
+        .modifier(ShortcutKeyboardOverlay(shortcut: $keyboardShortcut))
     }
 
     private var macroList: some View {
@@ -195,7 +198,16 @@ struct MacrosPage: View {
                                 .font(.callout).foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 12)
                         }
-                        ForEach(steps) { $step in
+                        ForEach(steps.wrappedValue) { step in
+                            let editedStep = Binding(
+                                get: { steps.wrappedValue.first { $0.id == step.id } ?? step },
+                                set: { edited in
+                                    var currentSteps = steps.wrappedValue
+                                    guard let currentIndex = currentSteps.firstIndex(where: { $0.id == step.id }) else { return }
+                                    currentSteps[currentIndex] = edited
+                                    steps.wrappedValue = currentSteps
+                                }
+                            )
                             VStack(alignment: .leading, spacing: SettingsStyle.Spacing.inline) {
                                 HStack {
                                     Text("步骤 \((macro.steps.firstIndex(where: { $0.id == step.id }) ?? 0) + 1)")
@@ -203,10 +215,11 @@ struct MacrosPage: View {
                                     Spacer()
                                     Button { steps.wrappedValue.removeAll { $0.id == step.id } } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("移除步骤")
                                 }
-                                ActionMappingEditor(value: $step.mapping, model: model, filter: .all, parentMacroID: macro.id)
+                                ActionMappingEditor(value: editedStep.mapping, model: model, filter: .all, parentMacroID: macro.id,
+                                                    onChooseKeyboard: { keyboardShortcut = $0 })
                                 HStack {
                                     Text("执行后等待").font(.caption).foregroundStyle(.secondary)
-                                    Slider(value: $step.delay, in: 0...3, step: 0.1)
+                                    Slider(value: editedStep.delay, in: 0...3, step: 0.1)
                                     Text(String(format: "%.1f 秒", step.delay)).font(.caption.monospacedDigit()).frame(width: 45)
                                 }
                             }

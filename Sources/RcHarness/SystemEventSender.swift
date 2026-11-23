@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
 
@@ -21,6 +22,21 @@ enum VirtualKey {
     static let v: CGKeyCode = 0x09
     static let leftBracket: CGKeyCode = 0x21
     static let rightBracket: CGKeyCode = 0x1E
+
+    static let fnNavigation: [CGKeyCode: CGKeyCode] = [
+        delete: CGKeyCode(kVK_ForwardDelete),
+        upArrow: CGKeyCode(kVK_PageUp),
+        downArrow: CGKeyCode(kVK_PageDown),
+        leftArrow: CGKeyCode(kVK_Home),
+        rightArrow: CGKeyCode(kVK_End)
+    ]
+
+    static let modifierDeviceFlags: [CGKeyCode: CGEventFlags] = [
+        command: .init(rawValue: 0x08), rightCommand: .init(rawValue: 0x10),
+        option: .init(rawValue: 0x20), rightOption: .init(rawValue: 0x40),
+        CGKeyCode(kVK_Shift): .init(rawValue: 0x02), CGKeyCode(kVK_RightShift): .init(rawValue: 0x04),
+        CGKeyCode(kVK_Control): .init(rawValue: 0x01), CGKeyCode(kVK_RightControl): .init(rawValue: 0x2000)
+    ]
 }
 
 /// NX_KEYTYPE_* codes for system-defined media key events.
@@ -31,18 +47,10 @@ private enum MediaKey {
     static let play = 16
 }
 
-/// Device-dependent flags from IOLLEvent.h. Shortcut listeners may use these
-/// bits to distinguish both the side and the down/up edge of a modifier.
-private enum ModifierDeviceFlag {
-    static let leftCommand = CGEventFlags(rawValue: 0x08) // NX_DEVICELCMDKEYMASK
-    static let rightCommand = CGEventFlags(rawValue: 0x10) // NX_DEVICERCMDKEYMASK
-    static let leftOption = CGEventFlags(rawValue: 0x20) // NX_DEVICELALTKEYMASK
-    static let rightOption = CGEventFlags(rawValue: 0x40) // NX_DEVICERALTKEYMASK
-}
-
 /// Every synthesized event goes through `postEvent`, so tests can observe all
 /// output without posting into the real session.
 final class SystemEventSender {
+    static let keyboardEventMarker: Int64 = 0x5263_4861_726E_6573
     private static let modifierKeyCodes: Set<CGKeyCode> = [
         0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
     ]
@@ -92,16 +100,16 @@ final class SystemEventSender {
         case .arrowDown: heldKey(VirtualKey.downArrow, flags: [], pressed: pressed)
         case .arrowLeft: heldKey(VirtualKey.leftArrow, flags: [], pressed: pressed)
         case .arrowRight: heldKey(VirtualKey.rightArrow, flags: [], pressed: pressed)
-        case .rightCommand: heldKey(VirtualKey.rightCommand, flags: [.maskCommand, ModifierDeviceFlag.rightCommand], pressed: pressed)
-        case .leftCommand: heldKey(VirtualKey.command, flags: [.maskCommand, ModifierDeviceFlag.leftCommand], pressed: pressed)
+        case .rightCommand: heldKey(VirtualKey.rightCommand, flags: .maskCommand, pressed: pressed)
+        case .leftCommand: heldKey(VirtualKey.command, flags: .maskCommand, pressed: pressed)
         case .fn:
             guard let functionKeySource else {
                 Log.hid.error("Cannot create HID event source for Fn")
                 return
             }
             heldKey(VirtualKey.function, flags: .maskSecondaryFn, pressed: pressed, source: functionKeySource)
-        case .leftOption: heldKey(VirtualKey.option, flags: [.maskAlternate, ModifierDeviceFlag.leftOption], pressed: pressed)
-        case .rightOption: heldKey(VirtualKey.rightOption, flags: [.maskAlternate, ModifierDeviceFlag.rightOption], pressed: pressed)
+        case .leftOption: heldKey(VirtualKey.option, flags: .maskAlternate, pressed: pressed)
+        case .rightOption: heldKey(VirtualKey.rightOption, flags: .maskAlternate, pressed: pressed)
         case .copy: heldKey(VirtualKey.c, flags: .maskCommand, pressed: pressed)
         case .paste: heldKey(VirtualKey.v, flags: .maskCommand, pressed: pressed)
         case .browserBack: heldKey(VirtualKey.leftBracket, flags: .maskCommand, pressed: pressed)
@@ -146,7 +154,7 @@ final class SystemEventSender {
             for down in [true, false] {
                 guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down) else { continue }
                 event.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
-                postEvent(event)
+                postKeyboardEvent(event)
             }
         }
     }
@@ -168,8 +176,14 @@ final class SystemEventSender {
     }
 
     private func key(_ code: CGKeyCode, flags: CGEventFlags = [], pressed: Bool, source: CGEventSource? = nil) {
-        let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: pressed)
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: pressed) else { return }
         var eventFlags = flags.union(heldModifiers)
+        if event.type == .flagsChanged {
+            eventFlags.formUnion(event.flags.intersection(.maskAlphaShift))
+        } else {
+            // Keep native keypad and function/navigation flags local to this event.
+            eventFlags.formUnion(event.flags.intersection([.maskNumericPad, .maskSecondaryFn, .maskHelp]))
+        }
         switch code {
         case VirtualKey.upArrow, VirtualKey.downArrow, VirtualKey.leftArrow, VirtualKey.rightArrow:
             // Native arrow events carry both flags even when Fn is not held.
@@ -178,8 +192,13 @@ final class SystemEventSender {
             eventFlags.formUnion([.maskSecondaryFn, .maskNumericPad])
         default: break
         }
-        event?.flags = eventFlags
-        if let event { postEvent(event) }
+        event.flags = eventFlags
+        postKeyboardEvent(event)
+    }
+
+    private func postKeyboardEvent(_ event: CGEvent) {
+        event.setIntegerValueField(.eventSourceUserData, value: Self.keyboardEventMarker)
+        postEvent(event)
     }
 
     private func mouse(_ button: CGMouseButton, pressed: Bool) {
@@ -218,6 +237,13 @@ final class SystemEventSender {
     }
 
     private func shortcutEvent(_ shortcut: RecordedShortcut) {
+        let shortcut: RecordedShortcut = if CGEventFlags(rawValue: shortcut.modifiers).contains(.maskSecondaryFn),
+            shortcut.modifierKeyCodes == nil, let navigationKey = VirtualKey.fnNavigation[shortcut.keyCode] {
+            // Physical Fn translates these keys before AppKit receives an event.
+            RecordedShortcut(keyCode: navigationKey, modifiers: shortcut.modifiers, label: shortcut.label)
+        } else {
+            shortcut
+        }
         if let usesFunctionSource = keyUsesFunctionSource[shortcut.keyCode],
            !Self.modifierKeyCodes.contains(shortcut.keyCode) {
             // A one-shot action still needs a down when its key is already
@@ -261,6 +287,7 @@ final class SystemEventSender {
 
     private func heldKey(_ code: CGKeyCode, flags: CGEventFlags, pressed: Bool,
                          source: CGEventSource? = nil) {
+        let flags = flags.union(VirtualKey.modifierDeviceFlags[code] ?? [])
         let identity = HeldKey(keyCode: code, flags: flags.rawValue, usesFunctionSource: source != nil)
         if pressed {
             let count = heldKeys[identity, default: 0]

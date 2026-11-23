@@ -56,6 +56,47 @@ final class MacroTagFilterTests: XCTestCase {
         XCTAssertTrue(popup.isVisible)
     }
 
+    func testKeyboardPickerStaysCenteredInTheMappingWindowAndKeepsItsDraft() async throws {
+        let suite = "RcHarness.KeyboardPickerSheetTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        let original = RecordedShortcut(keyCode: 40, modifiers: 0x0010_0000, label: "⌘K")
+        model.update(ButtonMapping(action: .recordedShortcut, shortcut: original), for: .buttonY, trigger: .long)
+        let controller = DashboardWindowController(model: model)
+        let window = try XCTUnwrap(controller.window)
+        window.setContentSize(SettingsStyle.minimumWindowSize)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+        model.openButtonEditor(.buttonY, trigger: .long)
+        await flushUI()
+
+        let host = try XCTUnwrap(window.contentView)
+        let action = try XCTUnwrap(testViewHierarchy(host).first { $0.identifier?.rawValue == "mapping-action-picker" })
+        let frame = action.convert(action.bounds, to: host)
+        let windowsBefore = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
+        let scrollViewsBefore = Set(testViewHierarchy(host).compactMap { $0 as? NSScrollView })
+        let windowFrame = window.frame
+        try click(NSPoint(x: frame.maxX - 129, y: host.isFlipped ? frame.maxY + 24 : host.bounds.height - frame.minY + 24),
+                  in: host, window: window)
+        await flushUI()
+
+        XCTAssertEqual(Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber)), windowsBefore)
+        XCTAssertEqual(window.frame, windowFrame)
+        XCTAssertNil(window.attachedSheet)
+        try snapshot(window: window, name: "shortcut-keyboard-in-mapping-window")
+        XCTAssertTrue(testViewHierarchy(host).compactMap { $0 as? NSScrollView }.allSatisfy(scrollViewsBefore.contains))
+        XCTAssertFalse(testViewHierarchy(host).contains { $0.identifier?.rawValue == "mapping-action-picker" })
+        let verticalCenter = host.bounds.midY + (host.safeAreaInsets.top - host.safeAreaInsets.bottom) / 2
+        try click(NSPoint(x: host.bounds.midX + ShortcutKeyboardPicker.preferredWidth / 2 - 55,
+                          y: verticalCenter + ShortcutKeyboardPicker.preferredHeight / 2 - 22), in: host, window: window)
+        await flushUI()
+        XCTAssertTrue(model.editorVisible)
+        XCTAssertTrue(testViewHierarchy(host).contains { $0.identifier?.rawValue == "mapping-action-picker" })
+        XCTAssertEqual(model.effectiveMapping[.buttonY, .long].shortcut, original)
+    }
+
     func testMappingMacroPickerOpensBelowScrollsAndClosesAfterSingleSelection() async throws {
         _ = NSApplication.shared
         let suite = "RcHarness.MappingMacroPopoverTests." + UUID().uuidString
@@ -239,20 +280,21 @@ final class MacroTagFilterTests: XCTestCase {
         try clickInTestWindow(adjusted, in: view)
     }
 
-    private func snapshot(window: NSWindow, popup: NSWindow) throws {
+    private func snapshot(window: NSWindow, popup: NSWindow? = nil, name: String = "macro-tag-filter") throws {
         guard let folder = ProcessInfo.processInfo.environment["RC_HARNESS_UI_SNAPSHOTS"] else { return }
         let directory = URL(fileURLWithPath: folder, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if ProcessInfo.processInfo.environment["RC_HARNESS_UI_CAPTURE_WINDOW"] == "1" {
             let capture = Process()
             capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            capture.arguments = ["-x", "-o", "-l", String(popup.windowNumber),
-                                 directory.appendingPathComponent("macro-tag-filter-window.png").path]
+            capture.arguments = ["-x", "-o", "-l", String((popup ?? window).windowNumber),
+                                 directory.appendingPathComponent("\(name)-window.png").path]
             try capture.run()
             capture.waitUntilExit()
         }
-        let views = [window.contentView!, popup.contentView!]
-        let frames = zip([window, popup], views).map { window, view in
+        let windows = [window] + [popup].compactMap { $0 }
+        let views = windows.map { $0.contentView! }
+        let frames = zip(windows, views).map { window, view in
             window.convertToScreen(view.convert(view.bounds, to: nil))
         }
         let bounds = frames.reduce(CGRect.null) { $0.union($1) }
@@ -270,6 +312,6 @@ final class MacroTagFilterTests: XCTestCase {
         }
         image.unlockFocus()
         let bitmap = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(image.tiffRepresentation)))
-        try bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("macro-tag-filter.png"))
+        try bitmap.representation(using: .png, properties: [:])?.write(to: directory.appendingPathComponent("\(name).png"))
     }
 }

@@ -829,6 +829,17 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         func render(_ index: Int) {
             guard index <= pages.count + 19 else {
                 renderSetupPreviews(in: directory)
+                let shortcut = RecordedShortcut(keyCode: 12, flags: [.maskControl, .maskCommand], keyLabel: "Q")
+                let keyboard = NSHostingView(rootView: ShortcutKeyboardPicker(shortcut: shortcut, onCancel: {}, onConfirm: { _ in }))
+                keyboard.appearance = NSApp.appearance
+                keyboard.frame.size = keyboard.fittingSize
+                keyboard.layoutSubtreeIfNeeded()
+                if let bitmap = keyboard.bitmapImageRepForCachingDisplay(in: keyboard.bounds) {
+                    keyboard.cacheDisplay(in: keyboard.bounds, to: bitmap)
+                    if let data = bitmap.representation(using: .png, properties: [:]) {
+                        try? data.write(to: directory.appendingPathComponent("shortcut-keyboard.png"))
+                    }
+                }
                 NSApp.terminate(nil)
                 return
             }

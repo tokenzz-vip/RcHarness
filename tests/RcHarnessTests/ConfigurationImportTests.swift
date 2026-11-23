@@ -135,6 +135,28 @@ final class ConfigurationImportTests: XCTestCase {
         XCTAssertEqual(SettingsStorage.configurationRecovery(defaults: defaults)?.backup, replaced)
     }
 
+    func testShortcutPhysicalCodesAndModifiersSurviveExportImportAndRestart() throws {
+        let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        let normal = ButtonMapping(action: .recordedShortcut,
+            shortcut: RecordedShortcut(keyCode: 8, modifiers: 0x0010_0010, label: "右侧 ⌘C"))
+        let global = ButtonMapping(action: .recordedShortcut, shortcut: .voiceHoldDefault)
+        let chord = ButtonMapping(action: .recordedShortcut, shortcut: VoiceShortcutChoice.pairs[0].shortcut)
+        model.update(normal, for: .dpadDown, trigger: .double)
+        model.update(global, for: .power, trigger: .long)
+        let macro = model.addMacro()
+        XCTAssertTrue(model.updateMacroSteps([MacroStep(mapping: chord)], for: macro))
+        let exported = directory.appendingPathComponent("shortcuts.json")
+        model.exportConfiguration(to: exported)
+        model.importConfiguration(from: try file(incoming()))
+        try model.confirmConfigurationImport(XCTUnwrap(model.pendingConfigurationImport).id)
+        model.importConfiguration(from: exported)
+        try model.confirmConfigurationImport(XCTUnwrap(model.pendingConfigurationImport).id)
+        let restarted = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
+        XCTAssertEqual(restarted.effectiveMapping[.dpadDown, .double], normal)
+        XCTAssertEqual(restarted.effectiveMapping[.power, .long], global)
+        XCTAssertEqual(restarted.macros.first(where: { $0.id == macro })?.steps.first?.mapping, chord)
+    }
+
     func testMalformedUnsupportedUnreadableAndAmbiguousFilesNeverPartiallyWrite() throws {
         let model = RemoteDashboardModel(mapping: .defaults, defaults: defaults)
         let before = model.configurationBackup()

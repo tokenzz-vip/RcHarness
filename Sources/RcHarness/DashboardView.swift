@@ -72,7 +72,24 @@ struct RemoteDashboardView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.actionNotices.first?.id)
-        .sheet(isPresented: $model.editorVisible) { MappingEditorSheet(model: model, actionFilter: $actionFilter) }
+        .disabled(model.editorVisible)
+        .accessibilityHidden(model.editorVisible)
+        .overlay {
+            if model.editorVisible {
+                ZStack {
+                    Color.black.opacity(0.24)
+                        .accessibilityHidden(true)
+                    MappingEditorSheet(model: model, actionFilter: $actionFilter)
+                        .clipShape(RoundedRectangle(cornerRadius: SettingsStyle.panelRadius))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: SettingsStyle.panelRadius)
+                                .strokeBorder(Color.primary.opacity(0.14))
+                                .allowsHitTesting(false)
+                        }
+                        .shadow(color: .black.opacity(0.2), radius: 16, y: 6)
+                }
+            }
+        }
         .sheet(item: $model.pendingConfigurationImport) { preview in
             ConfigurationImportSheet(model: model, preview: preview)
         }

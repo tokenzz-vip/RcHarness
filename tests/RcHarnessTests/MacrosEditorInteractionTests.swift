@@ -154,6 +154,57 @@ final class MacrosEditorInteractionTests: XCTestCase {
         XCTAssertEqual(fixture.steps, Array(steps.dropFirst()), "A queued capture must not overwrite the next row's binding")
     }
 
+    func testKeyboardPickerStaysInsideTheMacroEditorWindow() async throws {
+        let fixture = try Fixture(stepCount: 2)
+        defer { fixture.close() }
+        var steps = fixture.steps
+        let existing = RecordedShortcut(keyCode: 40, modifiers: CGEventFlags.maskCommand.rawValue, label: "⌘K")
+        steps[0].mapping = ButtonMapping(action: .recordedShortcut, shortcut: existing)
+        fixture.model.updateMacroSteps(steps, for: fixture.macroID)
+        await fixture.settle()
+        let previousWindows = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
+        let previousScrollViews = Set(testViewHierarchy(fixture.host).compactMap { $0 as? NSScrollView })
+        let action = try XCTUnwrap(fixture.visibleActionControls.first)
+        let frame = action.convert(action.bounds, to: fixture.host)
+        try fixture.click(NSPoint(x: frame.maxX - 129, y: fixture.host.isFlipped ? frame.maxY + 24 : frame.minY - 24),
+                          in: fixture.host)
+        await fixture.settle()
+        XCTAssertEqual(Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber)), previousWindows)
+        XCTAssertTrue(testViewHierarchy(fixture.host).compactMap { $0 as? NSScrollView }.allSatisfy(previousScrollViews.contains))
+        XCTAssertFalse(action.isEnabled)
+        try fixture.snapshot("shortcut-keyboard-in-macro-editor")
+
+        let bounds = fixture.host.bounds
+        let panelWidth = ShortcutKeyboardPicker.preferredWidth
+        let panelHeight = ShortcutKeyboardPicker.height(visibleHeight: bounds.height)
+        let footerY = (fixture.host.isFlipped ? 1.0 : -1.0) * (panelHeight / 2 - 22) + bounds.midY
+        try fixture.click(NSPoint(x: bounds.midX + panelWidth / 2 - 144, y: footerY), in: fixture.host)
+        await fixture.settle()
+        XCTAssertTrue(try XCTUnwrap(fixture.visibleActionControls.first).isEnabled)
+        XCTAssertEqual(fixture.steps, steps)
+    }
+
+    func testRecordingConsumesEscapeThroughAppKitAndSurvivesFocusMovingAfterRelease() async throws {
+        let fixture = try Fixture(stepCount: 2)
+        defer { fixture.close() }
+        var steps = fixture.steps
+        steps[0].mapping = ButtonMapping(action: .recordedShortcut)
+        fixture.model.updateMacroSteps(steps, for: fixture.macroID)
+        await fixture.settle()
+        let field = try await fixture.startRecordingFirstStep()
+        for pressed in [true, false] {
+            let event = try XCTUnwrap(CGEvent(keyboardEventSource: nil, virtualKey: VirtualKey.escape, keyDown: pressed))
+            event.flags = []
+            // Run the local AppKit dispatch path with this fixture active. No hardware event is posted.
+            NSApp.sendEvent(try XCTUnwrap(NSEvent(cgEvent: event)))
+        }
+        XCTAssertFalse(field.session.isRecording)
+        fixture.window.makeFirstResponder(nil)
+        await fixture.settle()
+        XCTAssertEqual(fixture.steps[0].mapping.shortcut?.keyCode, VirtualKey.escape)
+        XCTAssertEqual(fixture.steps[1], steps[1])
+    }
+
     func testMixedHeightRowsKeepTheirBindingsAfterOffscreenAndVisibleDeletions() async throws {
         let fixture = try Fixture(stepCount: 50, mixedHeights: true)
         defer { fixture.close() }

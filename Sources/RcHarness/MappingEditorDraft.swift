@@ -18,6 +18,14 @@ struct MappingEditorDraft {
     var voiceHoldShortcut: RecordedShortcut
     var voiceTapShortcut: RecordedShortcut
 
+    var hasIncompleteShortcut: Bool {
+        input != .options && input.supportedTriggers.contains { trigger in
+            let value = mapping[input, trigger]
+            return value != originalMapping[input, trigger]
+                && value.action == .recordedShortcut && value.shortcut == nil
+        }
+    }
+
     init(model: RemoteDashboardModel) {
         input = model.selectedInput
         remoteID = model.remoteProfile.id
