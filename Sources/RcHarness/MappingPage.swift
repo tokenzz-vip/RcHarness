@@ -271,7 +271,8 @@ private struct MappingCanvas: View {
         switch mapping.action {
         case .openHarnessSwitcher: "Harness 列表"
         case .showDesktop: "显示桌面"
-        case .switchToNativeMode: "原生模式"
+        case .switchToNativeMode: "停止映射"
+        case .toggleMouseMode: "鼠标模式"
         case .rapidDelete: "快速删除"
         case .showAllWindows: "查看所有窗口"
         case .switchApplications: "切换应用"
@@ -691,8 +692,8 @@ struct ActionMappingEditor: View {
         let basic: [RemoteAction] = [.enter, .backspace, .rapidDelete, .escape, .arrowUp, .arrowDown, .arrowLeft, .arrowRight, .copy, .paste, .browserBack, .browserForward]
         let system: [RemoteAction] = [.volumeUp, .volumeDown, .mute, .playPause, .showAllWindows] + RemoteAction.harnessFocusActions
             + (SystemDesktopController.shared.isSupported ? [.showDesktop] : [])
-            + [.mouseLeft, .mouseRight, .pointerUp, .pointerDown, .pointerLeft, .pointerRight, .scrollUp, .scrollDown]
-            + (parentMacroID == nil ? [.switchToNativeMode, .switchApplications, .openHarnessSwitcher, .openPhrases] : [])
+            + [.scrollUp, .scrollDown]
+            + (parentMacroID == nil ? RemoteAction.interactiveActions : [])
         let custom: [RemoteAction] = [.recordedShortcut, .openApplication, .phrase, .macro]
         let filtered: [RemoteAction]
         switch filter {
@@ -723,6 +724,10 @@ struct ActionMappingEditor: View {
             }
             if value.action == .switchToNativeMode {
                 Text("关闭遥控器映射，恢复原生按键。返回映射模式时，请在主面板开启「启用遥控器映射」，或点击菜单栏的模式项。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if value.action == .toggleMouseMode {
+                Text("触发同一手势可进入或退出鼠标模式。绑定了切换手势的按键在两种模式中都执行其按键映射。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if value.action == .showDesktop && SystemDesktopController.shared.isSupported {

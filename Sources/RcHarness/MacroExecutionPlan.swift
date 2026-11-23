@@ -40,8 +40,7 @@ struct MacroExecutionPlan {
             for step in macro.steps {
                 guard remainingSteps > 0 else { throw MacroExecutionError.tooManySteps }
                 remainingSteps -= 1
-                guard step.mapping.action != .switchToNativeMode, step.mapping.action != .openHarnessSwitcher,
-                      step.mapping.action != .openPhrases, step.mapping.action != .switchApplications else {
+                guard !RemoteAction.interactiveActions.contains(step.mapping.action) else {
                     throw MacroExecutionError.unsupportedAction
                 }
                 if step.mapping.action == .macro {

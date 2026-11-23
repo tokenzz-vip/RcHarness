@@ -103,7 +103,8 @@ struct PreparedConfiguration {
             harnessProfileIDs: Dictionary(uniqueKeysWithValues: normalized.harnesses.compactMap { harness in
                 harness.profileID.map { (harness.id, $0) }
             }), initializedHarnessIDs: normalized.harnesses.filter(\.didInitializeDefaultProfile).map(\.id),
-            globalButtons: globals, selectedProfileID: selectedProfileID, selectedHarnessID: selectedHarnessID)
+            globalButtons: globals, selectedProfileID: selectedProfileID, selectedHarnessID: selectedHarnessID,
+            mouseSettings: (current?.mouseSettings ?? RemoteMouseSettings()).normalized(for: remoteProfile, globals: globals))
         var result = SettingsBackup(version: 4, mapping: defaultMapping, profiles: normalized.profiles,
             macros: macros, phrases: original.phrases, harnesses: normalized.harnesses, globalButtons: globals,
             macroPresetsVersion: max(version, DefaultMacros.version), remoteKeyConfigurations: configurations)

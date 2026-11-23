@@ -365,6 +365,7 @@ struct RemoteKeyConfiguration: Codable, Equatable {
     var globalButtons: GlobalButtonSettings
     var selectedProfileID: UUID?
     var selectedHarnessID: String?
+    var mouseSettings: RemoteMouseSettings? = nil
 
     func normalized() -> Self {
         var result = self

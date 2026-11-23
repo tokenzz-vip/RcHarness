@@ -125,6 +125,9 @@ struct RemoteInputState<Source: Hashable> {
 
 @MainActor
 final class XiaomiRemoteHIDManager {
+    // AppKit tracks a mouse press in a nested run loop. Keep receiving
+    // remote HID input there so the release can finish the synthetic click.
+    static let inputRunLoopMode: CFRunLoopMode = .commonModes
     private let traceInputs = ProcessInfo.processInfo.environment["RC_HARNESS_REMOTE_TRACE"] == "1"
     private let profiles: [RemoteProfile]
     private var manager: IOHIDManager?
@@ -194,7 +197,7 @@ final class XiaomiRemoteHIDManager {
         IOHIDManagerScheduleWithRunLoop(
             manager,
             CFRunLoopGetMain(),
-            CFRunLoopMode.defaultMode.rawValue
+            Self.inputRunLoopMode.rawValue
         )
 
         // Monitor this keyboard/consumer device using Input Monitoring consent.
@@ -204,7 +207,7 @@ final class XiaomiRemoteHIDManager {
             IOHIDManagerUnscheduleFromRunLoop(
                 manager,
                 CFRunLoopGetMain(),
-                CFRunLoopMode.defaultMode.rawValue
+                Self.inputRunLoopMode.rawValue
             )
             let code = String(format: "0x%08x", UInt32(bitPattern: result))
             Log.hid.error("HID manager open failed: \(result) (\(code, privacy: .public))")
@@ -243,7 +246,7 @@ final class XiaomiRemoteHIDManager {
         IOHIDManagerUnscheduleFromRunLoop(
             manager,
             CFRunLoopGetMain(),
-            CFRunLoopMode.defaultMode.rawValue
+            Self.inputRunLoopMode.rawValue
         )
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = nil

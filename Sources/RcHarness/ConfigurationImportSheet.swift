@@ -13,7 +13,7 @@ struct ConfigurationImportSheet: View {
                     .font(SettingsStyle.Typography.dialogTitle)
                 Text(preview.source).font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle).help(preview.source)
-                Text("将替换各遥控器的全局按键、键位方案及 Harness 绑定，以及共用的组合动作、常用语和五向分配。")
+                Text("将替换各遥控器的全局按键、鼠标设置、键位方案及 Harness 绑定，以及共用的组合动作、常用语和五向分配。")
                     .font(SettingsStyle.Typography.body).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

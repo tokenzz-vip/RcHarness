@@ -46,10 +46,11 @@ struct AboutPage: View {
                 }.fixedSize(horizontal: false, vertical: true)
             }
             GlobalButtonsPanel(model: model)
+            MouseModePanel(model: model)
             PermissionsPanel(model: model)
                 .id(Self.permissionsSectionID)
             SettingsPanel("通用", symbol: "gearshape") {
-                SettingsPreference(symbol: "arrow.up.arrow.down", title: "配置导入与导出", detail: "备份各遥控器独立的全局按键、键位方案、组合动作和常用语。") {
+                SettingsPreference(symbol: "arrow.up.arrow.down", title: "配置导入与导出", detail: "备份各遥控器的全局按键、鼠标设置和键位方案，以及组合动作和常用语。") {
                     HStack {
                         Button("导出配置") { if let url = FilePanels.chooseConfigurationDestination() { model.exportConfiguration(to: url) } }
                         Button("导入配置") { if let url = FilePanels.chooseConfigurationSource() { model.importConfiguration(from: url) } }

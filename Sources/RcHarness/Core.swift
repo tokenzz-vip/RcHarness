@@ -240,6 +240,7 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
     case enter, backspace, rapidDelete, escape, arrowUp, arrowDown, arrowLeft, arrowRight
     // Preserve the stored value used by existing mappings and backups.
     case switchToNativeMode = "toggleMode"
+    case toggleMouseMode
     case rightCommand, copy, paste, browserBack, browserForward
     case mouseLeft, mouseRight, pointerUp, pointerDown, pointerLeft, pointerRight
     case scrollUp, scrollDown, volumeUp, volumeDown, recordedShortcut, openApplication, disabled
@@ -248,6 +249,7 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
     case focusClaude, focusCursor, focusDeepSeek, focusWorkBuddy, focusOpenCode
 
     static let harnessFocusActions: [Self] = [.focusChatGPT, .focusClaude, .focusCursor, .focusDeepSeek, .focusWorkBuddy, .focusOpenCode]
+    static let interactiveActions: [Self] = [.switchToNativeMode, .toggleMouseMode, .switchApplications, .openHarnessSwitcher, .openPhrases]
 
     var harnessFocusTarget: HarnessFocusTarget? {
         switch self {
@@ -287,7 +289,8 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
         case .arrowDown: "方向键 ↓"
         case .arrowLeft: "方向键 ←"
         case .arrowRight: "方向键 →"
-        case .switchToNativeMode: "切换到原生模式"
+        case .switchToNativeMode: "停止遥控器映射"
+        case .toggleMouseMode: "切换鼠标模式"
         case .rightCommand: "按住右侧 Command"
         case .showAllWindows: "查看所有窗口 (Control + ↑)"
         case .switchApplications: "切换应用 (⌘ Tab)"

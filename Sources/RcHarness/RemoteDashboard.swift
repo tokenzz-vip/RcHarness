@@ -23,6 +23,8 @@ final class RemoteDashboardModel: ObservableObject {
     }
     @Published private(set) var connectedRemoteProfileIDs: Set<String> = []
     @Published var operationMode: ControllerOperationMode = .mapping
+    @Published var mouseModeEnabled = false
+    @Published private(set) var mouseSettings = RemoteMouseSettings()
     @Published var voiceStatus = "遥控器麦克风未连接"
     @Published var voiceReady = false {
         didSet { if oldValue && !voiceReady { setup.resetVoiceTest() } }
@@ -50,6 +52,10 @@ final class RemoteDashboardModel: ObservableObject {
     @Published private(set) var globalButtons: GlobalButtonSettings {
         didSet {
             guard !isCommittingConfiguration else { return }
+            if !isRestoringRemoteConfiguration {
+                let normalized = mouseSettings.normalized(for: remoteProfile, globals: globalButtons)
+                if normalized != mouseSettings { mouseSettings = normalized }
+            }
             settingsWrites.save(globalButtons, SettingsKeys.Stored.globalButtons)
             persistRemoteKeyConfiguration()
             if !isRestoringRemoteConfiguration { onMappingChange?(effectiveMapping) }
@@ -215,6 +221,7 @@ final class RemoteDashboardModel: ObservableObject {
     var onUninstallMicrophone: (() -> Void)?
     var onRescan: (() -> Void)?
     var onToggleMode: (() -> Void)?
+    var onSetMouseMode: ((Bool) -> Void)?
     var onAudioChange: (() -> Void)?
     var onGainChange: ((Double) -> Void)?
     var onVoiceTriggerChange: (() -> Void)?
@@ -292,6 +299,7 @@ final class RemoteDashboardModel: ObservableObject {
                     ? .migrating(self.mapping, voiceFnTap: defaults.bool(forKey: SettingsKeys.voiceFnTap))
                     : .defaults(for: remoteProfile))
             globalButtons = globalButtons.normalized(for: remoteProfile)
+            mouseSettings = mouseSettings.normalized(for: remoteProfile, globals: globalButtons)
             isRestoringRemoteConfiguration = false
             settingsWrites.save(globalButtons, SettingsKeys.Stored.globalButtons)
             persistProfileConfiguration()
@@ -403,6 +411,13 @@ final class RemoteDashboardModel: ObservableObject {
 
     func isGlobalInput(_ input: ControllerInput) -> Bool {
         globalButtons.buttons.contains { $0.input == input }
+    }
+
+    func setMouseSettings(_ settings: RemoteMouseSettings) {
+        let normalized = settings.normalized(for: remoteProfile, globals: globalButtons)
+        guard mouseSettings != normalized else { return }
+        mouseSettings = normalized
+        persistRemoteKeyConfiguration()
     }
 
     func setGlobalInput(_ input: ControllerInput) {
@@ -722,7 +737,7 @@ final class RemoteDashboardModel: ObservableObject {
                                }),
                                initializedHarnessIDs: harnesses.filter(\.didInitializeDefaultProfile).map(\.id),
                                globalButtons: globalButtons, selectedProfileID: selectedProfileID,
-                               selectedHarnessID: selectedHarnessID)
+                               selectedHarnessID: selectedHarnessID, mouseSettings: mouseSettings)
     }
 
     private func persistRemoteKeyConfiguration() {
@@ -737,6 +752,8 @@ final class RemoteDashboardModel: ObservableObject {
         selectedProfileID = configuration?.selectedProfileID
         selectedHarnessID = configuration?.selectedHarnessID
         globalButtons = configuration?.globalButtons ?? .defaults(for: remoteProfile)
+        mouseSettings = (configuration?.mouseSettings ?? RemoteMouseSettings())
+            .normalized(for: remoteProfile, globals: globalButtons.normalized(for: remoteProfile))
         harnesses = harnesses.map { harness in
             // Configuration IDs have already been migrated. Migrate the app
             // metadata before looking up bindings and initialization intent.
@@ -779,6 +796,8 @@ final class RemoteDashboardModel: ObservableObject {
         harnesses = backup.harnesses ?? HarnessConfiguration.defaults
         globalButtons = backup.globalButtons ?? .defaults(for: remoteProfile)
         let current = remoteKeyConfigurations[remoteProfile.id]
+        mouseSettings = (current?.mouseSettings ?? RemoteMouseSettings())
+            .normalized(for: remoteProfile, globals: globalButtons)
         selectedProfileID = current?.selectedProfileID ?? SavedKeyProfile.defaultID
         selectedHarnessID = current?.selectedHarnessID
         mapping = profiles.first { $0.id == selectedProfileID }?.mapping ?? backup.mapping

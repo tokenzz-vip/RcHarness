@@ -8,7 +8,7 @@ extension Notification.Name {
 }
 
 @MainActor
-final class RcHarnessApp: NSObject, NSApplicationDelegate {
+final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var hid = XiaomiRemoteHIDManager()
     private var settingsDefaults: UserDefaults = .standard
     private lazy var voice = XiaomiRemoteVoice(defaults: settingsDefaults)
@@ -16,6 +16,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         self?.dashboardModel?.outputUID ?? RemoteMicrophoneOutput.deviceUID
     })
     private let sender = SystemEventSender()
+    private lazy var remoteMouse = RemoteMouseController(sender: sender, speed: { [weak self] in
+        self?.dashboardModel.mouseSettings.speed ?? RemoteMouseSettings().speed
+    })
     private let harnessComposerFocus = HarnessComposerFocus()
     private var harnessFocusRequest = UUID()
     private var renderDefaultsSuite: String?
@@ -45,6 +48,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     private var mode: ControllerOperationMode = .mapping
     private var inputPermissionsWereReady = false
     private var statusItem: NSStatusItem!
+    private let regularStatusIcon = MenuBarIcon.make()
+    private lazy var mouseModeStatusIcon = MenuBarIcon.makeMouseMode(appIcon: NSApp.applicationIconImage)
     private var statusMenu: NSMenu!
     private var windowController: DashboardWindowController!
     private var dashboardModel: RemoteDashboardModel!
@@ -89,6 +94,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         dashboardModel.onInstallMicrophone = { [weak self] in self?.installMicrophone() }
         dashboardModel.onUninstallMicrophone = { [weak self] in self?.uninstallMicrophone() }
         dashboardModel.onRescan = { [weak self] in
+            self?.remoteMouse.reset()
             self?.applicationSwitcher.reset()
             self?.harnessSwitcher.model.reset(reason: "rescan")
             self?.phrasePicker.model.reset()
@@ -97,6 +103,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self?.voice.start()
         }
         dashboardModel.onToggleMode = { [weak self] in self?.toggleMode() }
+        dashboardModel.onSetMouseMode = { [weak self] in self?.setMouseMode($0) }
         dashboardModel.onAudioChange = { [weak self] in
             self?.heldVoiceInput = nil
             self?.voiceSession.cancel()
@@ -145,8 +152,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             self.voiceSession.cancel()
             self.voice.cancelActiveStream()
             self.dashboardModel.stopTestTone()
-            if self.dashboardModel.setup.isPresented { self.setOperationMode(.mapping) }
-            self.statusMenu.item(withTag: 100)?.isEnabled = !self.dashboardModel.setup.isPresented
+            if self.dashboardModel.setup.isPresented {
+                self.setMouseMode(false)
+                self.setOperationMode(.mapping)
+            }
         }
         windowController.onWindowClose = { [weak self] in
             // Closing the only window leaves RcHarness running from the menu
@@ -195,6 +204,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     private func switchRemote(to profile: RemoteProfile) {
+        setMouseMode(false)
         applicationSwitcher.reset()
         remoteSelectionRevision += 1
         let revision = remoteSelectionRevision
@@ -255,6 +265,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if renderDefaultsSuite != nil { return .terminateNow }
+        remoteMouse.reset()
         applicationSwitcher.reset()
         hid.stop()
         voice.stop()
@@ -294,6 +305,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     }
 
     @objc private func suspendVoice() {
+        remoteMouse.reset()
         applicationSwitcher.reset()
         harnessSwitcher.model.reset(reason: "sleep")
         phrasePicker.model.reset()
@@ -329,7 +341,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         statusItem.button?.target = self
         statusItem.button?.action = #selector(showWindow)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        statusItem.button?.image = MenuBarIcon.make()
+        statusItem.button?.image = regularStatusIcon
         statusItem.button?.title = ""
         statusItem.button?.setAccessibilityLabel("RcHarness")
         updateStatusItem()
@@ -347,6 +359,10 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         modeItem.target = self
         modeItem.tag = 100
         statusMenu.addItem(modeItem)
+        let mouseItem = NSMenuItem(title: "鼠标模式", action: #selector(toggleMouseMode), keyEquivalent: "")
+        mouseItem.target = self
+        mouseItem.tag = 102
+        statusMenu.addItem(mouseItem)
         let resetItem = NSMenuItem(title: "恢复当前方案的默认映射…", action: #selector(resetMapping), keyEquivalent: "")
         resetItem.target = self
         statusMenu.addItem(resetItem)
@@ -374,6 +390,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.dashboardModel?.setConnected(connected)
             if !connected {
+                self.remoteMouse.reset()
                 self.applicationSwitcher.reset()
                 self.harnessSwitcher.model.reset(reason: "remote-disconnected")
                 self.phrasePicker.model.reset()
@@ -398,6 +415,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         hid.onButtonCancelled = { [weak self] input in
             guard let self else { return }
             self.applicationSwitcher.cancel(input)
+            _ = self.remoteMouse.release(input)
             self.gestures.cancel(input)
             self.phrasePicker.model.cancel(input)
             if self.heldVoiceInput == input {
@@ -454,6 +472,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
 
     private func handle(input: ControllerInput, pressed: Bool) {
         if dashboardModel.setup.consumes(input, pressed: pressed) { return }
+        let mouseReleased = !pressed && remoteMouse.release(input)
         if applicationSwitcher.handle(input, pressed: pressed) {
             // Keep the other modal routers' physical key tracking up to date.
             _ = phrasePicker.model.handle(input, pressed: pressed)
@@ -477,7 +496,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         if dashboardModel?.isGlobalInput(input) == true {
             Log.switcher.notice("Global input=\(input.rawValue, privacy: .public) down=\(pressed) consumed=\(consumed) mapping_mode=\(self.mode == .mapping) single=\(self.mapping[input, .single].action.rawValue, privacy: .public) double=\(self.mapping[input, .double].action.rawValue, privacy: .public) long=\(self.mapping[input, .long].action.rawValue, privacy: .public)")
         }
-        if consumed { return }
+        if consumed || mouseReleased { return }
+        if pressed, dashboardModel.mouseModeEnabled, !dashboardModel.isGlobalInput(input),
+           remoteMouse.press(input, settings: dashboardModel.mouseSettings, mapping: mapping) {
+            gestures.cancel(input)
+            return
+        }
         // Keep routing the fixed voice key release to its active session.
         if !pressed {
             if heldVoiceInput == input {
@@ -522,6 +546,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
     private func sendAction(_ button: ButtonMapping, pressed: Bool, input: ControllerInput? = nil) {
         if button.action == .switchApplications {
             guard pressed, mode == .mapping, let input else { return }
+            remoteMouse.reset()
             harnessSwitcher.model.dismiss(reason: "application-switcher-opened")
             phrasePicker.model.dismiss()
             gestures.cancel()
@@ -537,6 +562,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 phrasePicker.model.dismiss()
             } else {
                 harnessSwitcher.model.dismiss(reason: "phrases-opened")
+                remoteMouse.reset()
                 gestures.cancel()
                 cancelMacros()
                 heldVoiceInput = nil
@@ -551,6 +577,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 harnessSwitcher.model.dismiss(reason: "open-action-toggle")
             } else {
                 phrasePicker.model.dismiss()
+                remoteMouse.reset()
                 harnessSwitcher.show(input: input)
                 gestures.cancel()
                 cancelMacros()
@@ -563,6 +590,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             focusHarness(target)
         } else if button.action == .switchToNativeMode {
             if pressed { setOperationMode(.native) }
+        } else if button.action == .toggleMouseMode {
+            if pressed { toggleMouseMode() }
         } else if button.action == .phrase {
             if pressed, let phrase = dashboardModel?.phrases.first(where: { $0.id.uuidString == button.referenceID }) {
                 sender.typeText(phrase.text)
@@ -653,9 +682,33 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         setOperationMode(mode == .mapping ? .native : .mapping)
     }
 
+    @objc private func toggleMouseMode() {
+        setMouseMode(!dashboardModel.mouseModeEnabled)
+    }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(toggleMode): return dashboardModel?.setup.isPresented == false
+        case #selector(toggleMouseMode): return mode == .mapping && dashboardModel?.setup.isPresented == false
+        default: return true
+        }
+    }
+
+    private func setMouseMode(_ enabled: Bool) {
+        guard !enabled || (mode == .mapping && !dashboardModel.setup.isPresented),
+              dashboardModel.mouseModeEnabled != enabled else { return }
+        remoteMouse.reset()
+        gestures.cancel()
+        dashboardModel.mouseModeEnabled = enabled
+        statusMenu.item(withTag: 102)?.state = enabled ? .on : .off
+        statusItem.button?.image = enabled ? mouseModeStatusIcon : regularStatusIcon
+        updateStatusItem()
+    }
+
     private func setOperationMode(_ newMode: ControllerOperationMode) {
         applicationSwitcher.reset()
         guard mode != newMode else { return }
+        setMouseMode(false)
         harnessComposerFocus.cancel()
         harnessFocusRequest = UUID()
         harnessSwitcher.model.reset(reason: "mode-changed")
@@ -827,7 +880,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
             return CommandLine.arguments[flag + 1]
         }()
         func render(_ index: Int) {
-            guard index <= pages.count + 19 else {
+            guard index <= pages.count + 20 else {
                 renderSetupPreviews(in: directory)
                 let shortcut = RecordedShortcut(keyCode: 12, flags: [.maskControl, .maskCommand], keyLabel: "Q")
                 let keyboard = NSHostingView(rootView: ShortcutKeyboardPicker(shortcut: shortcut, onCancel: {}, onConfirm: { _ in }))
@@ -843,7 +896,11 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
                 return
             }
-            let applicationSwitcherPreview = index == pages.count + 19
+            let systemActionPreview: RemoteAction? = switch index - pages.count {
+            case 19: .switchApplications
+            case 20: .toggleMouseMode
+            default: nil
+            }
             let chatgptPreview = index == pages.count
             let switcherPreview = index == pages.count + 1
             let voiceEditorPreview = index == pages.count + 2
@@ -923,11 +980,11 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 dashboardModel.phrases = DefaultPhrases.all
                 dashboardModel.phraseAssignments = DefaultPhrases.assignments(for: dashboardModel.phrases)
                 windowController.window?.makeKeyAndOrderFront(nil)
-            } else if applicationSwitcherPreview {
+            } else if let action = systemActionPreview {
                 dashboardModel.page = .mapping
                 dashboardModel.selectedInput = .home
                 dashboardModel.selectedTrigger = .single
-                dashboardModel.update(ButtonMapping(action: .switchApplications), for: .home, trigger: .single)
+                dashboardModel.update(ButtonMapping(action: action), for: .home, trigger: .single)
                 windowController.window?.makeKeyAndOrderFront(nil)
             } else if rapidDeletePreview {
                 dashboardModel.page = .mapping
@@ -961,8 +1018,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 windowController.window?.makeKeyAndOrderFront(nil)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
-                let filename = applicationSwitcherPreview ? "application-switcher-editor" : macroEditorPreview ? "macro-editor" : statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : chatgptPreview ? "mapping-" + previewHarnessID : pages[index].rawValue
-                let voiceEditor = voiceEditorPreview || rapidDeletePreview || macroEditorPreview || applicationSwitcherPreview ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel, actionFilter: .constant(applicationSwitcherPreview ? .system : .all))) : nil
+                let filename = systemActionPreview == .toggleMouseMode ? "mouse-mode-editor"
+                    : systemActionPreview == .switchApplications ? "application-switcher-editor"
+                    : macroEditorPreview ? "macro-editor" : statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : chatgptPreview ? "mapping-" + previewHarnessID : pages[index].rawValue
+                let voiceEditor = voiceEditorPreview || rapidDeletePreview || macroEditorPreview || systemActionPreview != nil
+                    ? NSHostingView(rootView: MappingEditorSheet(model: dashboardModel,
+                        actionFilter: .constant(systemActionPreview == nil ? .all : .system))) : nil
                 voiceEditor?.frame = NSRect(x: 0, y: 0, width: 560, height: macroEditorPreview ? 460 : 560)
                 let isNewProfile = index == pages.count + 3
                 let nameEditor = profileNamePreview ? NSHostingView(rootView: ProfileNameSheet(
@@ -1164,7 +1225,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async {
             let connection = self.hid.isConnected ? "遥控器已连接" : "遥控器未连接"
             let voice = self.voice.isReady ? " · 语音已就绪" : ""
-            let mode = self.mode == .mapping ? "映射模式" : "原生模式"
+            let mode = self.dashboardModel?.mouseModeEnabled == true ? "鼠标模式"
+                : (self.mode == .mapping ? "映射模式" : "原生模式")
             let description = "RcHarness · \(connection)\(voice) · \(mode)"
             self.statusItem.button?.toolTip = description
             self.statusItem.button?.setAccessibilityHelp(description)

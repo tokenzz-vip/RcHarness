@@ -137,7 +137,7 @@ final class SystemEventSender {
         case .volumeDown: mediaKey(MediaKey.soundDown, pressed: pressed)
         case .mute: mediaKey(MediaKey.mute, pressed: pressed)
         case .playPause: mediaKey(MediaKey.play, pressed: pressed)
-        case .phrase, .macro, .switchToNativeMode, .openHarnessSwitcher, .openPhrases, .switchApplications,
+        case .phrase, .macro, .switchToNativeMode, .toggleMouseMode, .openHarnessSwitcher, .openPhrases, .switchApplications,
              .focusChatGPT, .focusClaude, .focusCursor, .focusDeepSeek, .focusWorkBuddy, .focusOpenCode, .disabled: break
         }
     }
@@ -221,6 +221,7 @@ final class SystemEventSender {
         }
         if let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: cursorLocation(), mouseButton: button) {
             event.flags = heldModifiers
+            event.setIntegerValueField(.mouseEventClickState, value: 1)
             postEvent(event)
         }
     }
@@ -229,6 +230,24 @@ final class SystemEventSender {
         guard pressed else { return }
         let current = cursorLocation()
         movePointer(CGPoint(x: current.x + x, y: current.y + y))
+    }
+
+    func moveCursor(dx: CGFloat, dy: CGFloat) {
+        let current = cursorLocation()
+        let location = CGPoint(x: current.x + dx, y: current.y + dy)
+        let type: CGEventType
+        let button: CGMouseButton
+        if heldMouseButtons[CGMouseButton.left.rawValue] != nil {
+            (type, button) = (.leftMouseDragged, .left)
+        } else if heldMouseButtons[CGMouseButton.right.rawValue] != nil {
+            (type, button) = (.rightMouseDragged, .right)
+        } else {
+            (type, button) = (.mouseMoved, .left)
+        }
+        if let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: location, mouseButton: button) {
+            event.flags = heldModifiers
+            postEvent(event)
+        }
     }
 
     private func scroll(_ value: Int32, pressed: Bool) {

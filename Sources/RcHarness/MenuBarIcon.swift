@@ -1,10 +1,14 @@
 import AppKit
 
+@MainActor
 enum MenuBarIcon {
+    // The variable-length status item uses the image width to calculate its own width.
+    private static let size = NSSize(width: 22, height: 22)
+
     // Draw at menu-bar scale: a remote controlling an AI prompt bubble.
     // Template rendering follows the menu bar's light, dark and selected states.
     static func make() -> NSImage {
-        let image = NSImage(size: NSSize(width: 24, height: 24), flipped: false) { _ in
+        let artwork = NSImage(size: NSSize(width: 24, height: 24), flipped: false) { _ in
             NSColor.black.setFill()
             NSBezierPath(roundedRect: NSRect(x: 10, y: 12, width: 13, height: 10), xRadius: 3, yRadius: 3).fill()
             let tail = NSBezierPath()
@@ -58,8 +62,19 @@ enum MenuBarIcon {
             signal.stroke()
             return true
         }
-        image.size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { bounds in
+            artwork.draw(in: bounds.insetBy(dx: 2, dy: 2))
+            return true
+        }
         image.isTemplate = true
         return image
+    }
+
+    static func makeMouseMode(appIcon: NSImage) -> NSImage {
+        // The bundle artwork includes transparent margins around its tile.
+        NSImage(size: size, flipped: false) { bounds in
+            appIcon.draw(in: bounds)
+            return true
+        }
     }
 }

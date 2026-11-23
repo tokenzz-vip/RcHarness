@@ -72,7 +72,7 @@ final class InputAndAudioTests: XCTestCase {
         let data = Data("\"toggleMode\"".utf8)
         let action = try JSONDecoder().decode(RemoteAction.self, from: data)
         XCTAssertEqual(action, .switchToNativeMode)
-        XCTAssertEqual(action.label, "切换到原生模式")
+        XCTAssertEqual(action.label, "停止遥控器映射")
         XCTAssertEqual(try JSONEncoder().encode(action), data)
     }
 
