@@ -155,6 +155,9 @@ final class MacrosEditorInteractionTests: XCTestCase {
     }
 
     func testKeyboardPickerStaysInsideTheMacroEditorWindow() async throws {
+        #if arch(x86_64)
+        try XCTSkipIf(true, "Intel CI crashes in the SwiftUI keyboard picker renderer (MTLLoader assertion)")
+        #endif
         let fixture = try Fixture(stepCount: 2)
         defer { fixture.close() }
         var steps = fixture.steps
