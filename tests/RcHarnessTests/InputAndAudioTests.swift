@@ -475,7 +475,7 @@ final class InputAndAudioTests: XCTestCase {
         for _ in 0..<8 { output.append(Array(repeating: 100, count: 2_000)) }
         XCTAssertEqual(output.queuedSamples, 8_000)
         XCTAssertEqual(output.droppedSamples, 8_000)
-        XCTAssertEqual(playback.completions.count, 4)
+        XCTAssertEqual(playback.completions.count, 2)
         output.stop()
 
         playback.acceptsAudio = false
@@ -487,6 +487,18 @@ final class InputAndAudioTests: XCTestCase {
         XCTAssertTrue(released)
         XCTAssertEqual(output.state, .failed("无法写入遥控器音频"))
         XCTAssertEqual(output.queuedSamples, 0)
+    }
+
+    func testSmallPacketBurstUsesCatchUpBudgetWithoutDroppingAudio() {
+        let playback = Playback()
+        let output = RemoteMicrophoneOutput(makePlayback: { playback })
+        output.begin()
+        for _ in 0..<40 { output.append(Array(repeating: 100, count: 320)) }
+
+        XCTAssertEqual(output.queuedSamples, 12_800)
+        XCTAssertEqual(output.droppedSamples, 0)
+        XCTAssertEqual(playback.completions.count, 4)
+        output.stop()
     }
 
     func testInterruptedPlaybackEndsSessionAndNextPressRecreatesAudioGraph() {
@@ -541,9 +553,14 @@ final class InputAndAudioTests: XCTestCase {
 
         XCTAssertNil(output.failure)
         XCTAssertEqual(creations, 2)
-        XCTAssertEqual(replacement.packets, [[1, 2], [3, 4], [5, 6]])
+        XCTAssertEqual(replacement.packets, [[1, 2], [3, 4]])
         XCTAssertEqual(output.queuedSamples, 6)
         XCTAssertEqual(output.deliveredSamples, 0)
+        XCTAssertEqual(releases, 0)
+        replacement.completeAll()
+        await drainMainQueue()
+        XCTAssertEqual(replacement.packets, [[1, 2], [3, 4], [5, 6]])
+        XCTAssertEqual(output.deliveredSamples, 4)
         XCTAssertEqual(releases, 0)
         replacement.completeAll()
         await drainMainQueue()
@@ -852,6 +869,10 @@ final class InputAndAudioTests: XCTestCase {
         let actual = chunks.process(Array(pcm.prefix(123))) + chunks.process(Array(pcm.dropFirst(123)))
         XCTAssertEqual(actual, expected)
         XCTAssertTrue(actual.allSatisfy { $0.isFinite && abs($0) <= 0.999 })
+        var int16 = RemoteVoiceEnhancer(gainDB: 24)
+        let quantized = int16.processInt16(pcm)
+        let expectedQuantized = expected.map { Int16((max(-1, min(1, $0)) * 32_767).rounded()) }
+        XCTAssertEqual(quantized, expectedQuantized)
         var zero = RemoteVoiceEnhancer()
         var explicitZero = RemoteVoiceEnhancer(gainDB: 0)
         XCTAssertEqual(zero.process(pcm), explicitZero.process(pcm))

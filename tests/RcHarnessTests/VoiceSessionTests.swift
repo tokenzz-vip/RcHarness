@@ -51,9 +51,8 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertEqual(h.edges, [true, false])
         h.controller.handle(.started)
         h.controller.append([1, 2, 3])
-        XCTAssertTrue(h.output.packets.isEmpty, "Keep first speech while the target starts")
+        XCTAssertEqual(h.output.packets, [[1, 2, 3]])
         h.controller.handle(.ended)
-        h.clock.advance(0.15)
         XCTAssertEqual(h.output.packets, [[1, 2, 3]])
         XCTAssertEqual(h.output.ends, 1)
         h.output.completeDrain()
@@ -127,7 +126,7 @@ final class VoiceSessionTests: XCTestCase {
         h.controller.cancel()
         h.controller.cancel()
         h.controller.append([99])
-        h.clock.advance(2)
+        h.clock.advance(0.3)
         XCTAssertEqual(h.edges, [true, false, true, false])
         XCTAssertTrue(h.output.packets.isEmpty)
         let count = h.keys.count
@@ -147,6 +146,16 @@ final class VoiceSessionTests: XCTestCase {
         h.output.completeDrain()
         XCTAssertEqual(h.keys.map { $0.0 }, [.rightCommand, .rightCommand])
         XCTAssertEqual(h.edges, [true, false])
+    }
+
+    func testHoldForwardsAudioImmediatelyAfterShortcutPress() {
+        let h = VoiceHarness()
+        h.controller.press(mapping: fn, fnTap: false)
+        h.controller.handle(.started)
+        h.controller.append([1, 2, 3])
+
+        XCTAssertEqual(h.edges, [true])
+        XCTAssertEqual(h.output.packets, [[1, 2, 3]])
     }
 
     func testCancellationWithoutAStartedTargetDoesNotWakeIt() {
@@ -295,7 +304,10 @@ final class VoiceSessionTests: XCTestCase {
         h.controller.press(mapping: fn, fnTap: true)
         var completed = 0
         h.controller.cancel { completed += 1 }
-        h.clock.advance(0.28)
+        h.clock.advance(0.119)
+        XCTAssertEqual(completed, 0)
+        XCTAssertEqual(h.edges, [true])
+        h.clock.advance(0.001)
         XCTAssertEqual(completed, 0)
         XCTAssertEqual(h.edges, [true, false, true])
         h.clock.advance(0.12)
@@ -311,17 +323,15 @@ final class VoiceSessionTests: XCTestCase {
         XCTAssertTrue(h.keys.isEmpty)
     }
 
-    func testBufferedSpeechIsBoundedWhileTheTargetStarts() {
+    func testImmediateSpeechPreservesPacketOrder() {
         let h = VoiceHarness()
         h.controller.press(mapping: fn, fnTap: true)
         h.controller.handle(.started)
         h.controller.append(Array(repeating: 1, count: 5000))
         h.controller.append(Array(repeating: 2, count: 7000))
-        XCTAssertTrue(h.output.packets.isEmpty)
-        h.clock.advance(0.28)
         let samples = h.output.packets.flatMap { $0 }
-        XCTAssertEqual(samples.count, 8000)
-        XCTAssertEqual(samples.prefix(1000), Array(repeating: Int16(1), count: 1000)[...])
+        XCTAssertEqual(samples.count, 12_000)
+        XCTAssertEqual(samples.prefix(5000), Array(repeating: Int16(1), count: 5000)[...])
         XCTAssertEqual(samples.suffix(7000), Array(repeating: Int16(2), count: 7000)[...])
         h.controller.cancel()
         h.clock.advance(1)

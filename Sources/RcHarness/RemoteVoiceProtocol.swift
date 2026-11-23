@@ -195,32 +195,39 @@ struct RemoteVoiceEnhancer {
         guard !samples.isEmpty else { return [] }
         var output: [Float] = []
         output.reserveCapacity(samples.count)
-        for sample in samples {
-            let input = Float(sample) / 32_768
-            let filtered = highPassCoefficient * (previousFilterOutput + input - previousInput)
-            previousInput = input
-            previousFilterOutput = filtered
-
-            // A causal approximation of the three-point moving average used
-            // for this codec: enough to hide ADPCM grit without blurring
-            // speech transients or introducing a packet-sized delay.
-            let smoothed = 0.75 * filtered + 0.25 * previousSmoothedOutput
-            previousSmoothedOutput = smoothed
-
-            let magnitude = abs(smoothed)
-            let coefficient = magnitude > envelope ? attackCoefficient : releaseCoefficient
-            envelope = coefficient * envelope + (1 - coefficient) * magnitude
-            let normalizedEnvelope = min(1, envelope / gateThreshold)
-            let gateGain = gateFloor + (1 - gateFloor) * normalizedEnvelope * normalizedEnvelope
-            output.append(softLimit(smoothed * gateGain * inputGain))
-        }
+        for sample in samples { output.append(processSample(sample)) }
         return output
     }
 
     mutating func processInt16(_ samples: [Int16]) -> [Int16] {
-        process(samples).map { value in
-            Int16((max(-1, min(1, value)) * 32_767).rounded())
+        guard !samples.isEmpty else { return [] }
+        var output: [Int16] = []
+        output.reserveCapacity(samples.count)
+        for sample in samples {
+            let value = processSample(sample)
+            output.append(Int16((max(-1, min(1, value)) * 32_767).rounded()))
         }
+        return output
+    }
+
+    private mutating func processSample(_ sample: Int16) -> Float {
+        let input = Float(sample) / 32_768
+        let filtered = highPassCoefficient * (previousFilterOutput + input - previousInput)
+        previousInput = input
+        previousFilterOutput = filtered
+
+        // A causal approximation of the three-point moving average used
+        // for this codec: enough to hide ADPCM grit without blurring
+        // speech transients or introducing a packet-sized delay.
+        let smoothed = 0.75 * filtered + 0.25 * previousSmoothedOutput
+        previousSmoothedOutput = smoothed
+
+        let magnitude = abs(smoothed)
+        let coefficient = magnitude > envelope ? attackCoefficient : releaseCoefficient
+        envelope = coefficient * envelope + (1 - coefficient) * magnitude
+        let normalizedEnvelope = min(1, envelope / gateThreshold)
+        let gateGain = gateFloor + (1 - gateFloor) * normalizedEnvelope * normalizedEnvelope
+        return softLimit(smoothed * gateGain * inputGain)
     }
 
     private func softLimit(_ sample: Float) -> Float {
@@ -270,13 +277,14 @@ struct RemoteVoiceStream {
         receivedBytes += data.count
         pending.append(data)
         var result: [Int16] = []
+        result.reserveCapacity((pending.count / frameBytes) * frameBytes * 2)
         while pending.count >= frameBytes {
             result += decoder.decode(Data(pending.prefix(frameBytes)))
             pending.removeFirst(frameBytes)
             decodedFrames += 1
         }
         sampleCount += result.count
-        peak = max(peak, result.map { abs(Int($0)) }.max() ?? 0)
+        for sample in result { peak = max(peak, abs(Int(sample))) }
         return result
     }
 

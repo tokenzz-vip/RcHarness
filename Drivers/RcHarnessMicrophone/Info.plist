@@ -5,8 +5,8 @@
   <key>CFBundleExecutable</key><string>RcHarnessMicrophone</string>
   <key>CFBundleName</key><string>RcHarness Microphone</string>
   <key>CFBundlePackageType</key><string>BNDL</string>
-  <key>CFBundleVersion</key><string>4</string>
-  <key>CFBundleShortVersionString</key><string>1.2.0</string>
+  <key>CFBundleVersion</key><string>6</string>
+  <key>CFBundleShortVersionString</key><string>1.3.2</string>
   <key>CFPlugInDynamicRegistration</key><false/>
   <key>CFPlugInFactories</key><dict>
     <key>6BF0F742-2E88-4D2B-AB18-6FD5E4EDE414</key><string>RcHarnessMicrophoneFactory</string>

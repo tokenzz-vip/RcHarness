@@ -12,20 +12,40 @@ enum RemoteMicrophoneInstallation {
         return updateRequired(bundledDriver: bundledDriver, installedDriver: URL(fileURLWithPath: installedDriverPath))
     }
 
+    static var updateNotice: String {
+        let bundled = bundledDriverVersion ?? "新版本"
+        let installed = installedDriverVersion ?? "当前版本"
+        return "麦克风组件有新版本（\(installed) → \(bundled)），请在「连接与语音」中更新。"
+    }
+
+    private static var bundledDriverVersion: String? {
+        guard let driver = Bundle.main.builtInPlugInsURL?.appendingPathComponent("RcHarnessMicrophone.driver") else {
+            return nil
+        }
+        return driverVersion(at: driver)
+    }
+
+    private static var installedDriverVersion: String? {
+        driverVersion(at: URL(fileURLWithPath: installedDriverPath))
+    }
+
     static var isInstalledOnDisk: Bool { FileManager.default.fileExists(atPath: installedDriverPath) }
 
     static func updateRequired(bundledDriver: URL, installedDriver: URL) -> Bool {
         // CFBundle may cache identical identifiers from different locations.
-        // Read metadata directly so the bundled v4 and installed v3 coexist.
-        func version(_ driver: URL) -> String? {
-            guard let data = try? Data(contentsOf: driver.appendingPathComponent("Contents/Info.plist")),
-                  let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return nil }
-            return plist["CFBundleVersion"] as? String
-        }
-        guard let bundledVersion = version(bundledDriver) else { return false }
+        // Read metadata directly so bundled and installed versions can coexist.
+        guard let bundledVersion = driverVersion(at: bundledDriver) else { return false }
         guard FileManager.default.fileExists(atPath: installedDriver.path) else { return false }
-        guard let installedVersion = version(installedDriver) else { return true }
+        guard let installedVersion = driverVersion(at: installedDriver) else { return true }
         return bundledVersion.compare(installedVersion, options: .numeric) == .orderedDescending
+    }
+
+    private static func driverVersion(at driver: URL) -> String? {
+        guard let data = try? Data(contentsOf: driver.appendingPathComponent("Contents/Info.plist")),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            return nil
+        }
+        return plist["CFBundleVersion"] as? String
     }
 
     static func install() async throws {

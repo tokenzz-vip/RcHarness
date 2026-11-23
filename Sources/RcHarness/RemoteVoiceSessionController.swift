@@ -55,7 +55,6 @@ final class RemoteVoiceSessionController {
     private let schedule: Scheduler
     private let logger: (String) -> Void
     private let tapDuration: TimeInterval = 0.12
-    private let targetStartDelay: TimeInterval = 0.15
     private var nextID = 0
     // One active session and up to two waiting presses; rapid presses cannot
     // retain unlimited audio or overwrite a key which still needs releasing.
@@ -197,20 +196,13 @@ final class RemoteVoiceSessionController {
         if session.tap {
             session.startTapStarted = true
             emit(session, mapping: mapping, down: true, reason: "start_tap")
+            session.gateOpen = true
+            pump(session)
             session.tasks.append(schedule(tapDuration) { [weak self, weak session] in
                 guard let self, let session, self.current === session, !session.closed else { return }
                 self.emit(session, mapping: mapping, down: false, reason: "start_tap")
                 session.startTapFinished = true
-                // This is a startup grace period, not proof that the external
-                // application accepted Fn or has begun recording.
-                session.tasks.append(self.schedule(self.targetStartDelay) { [weak self, weak session] in
-                    guard let self, let session, self.current === session, !session.closed else { return }
-                    session.gateOpen = true
-                    if session.cancelled { self.closeTarget(session) }
-                    else if session.toggle, session.finishRequested { self.pump(session) }
-                    else if session.finishRequested { self.closeTarget(session) }
-                    else { self.pump(session) }
-                })
+                if session.finishRequested { self.closeTarget(session) }
             })
         } else {
             session.gateOpen = true

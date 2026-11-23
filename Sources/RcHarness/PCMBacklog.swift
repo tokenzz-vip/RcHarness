@@ -56,6 +56,10 @@ struct PCMBacklog {
 extension PCMBacklog {
     /// Half a second of 16 kHz voice for the target-start gate and live playback.
     static let voiceLimit = 8_000
+    /// Keep up to one second while the output catches up with a short burst
+    /// of BLE packets. Normal playback returns to `voiceLimit` after it drains.
+    static let catchUpVoiceLimit = 16_000
+    static let catchUpThreshold = 640
     /// A cold audio graph can take seconds to initialize. Retain the first
     /// sentence separately from the short live-playback latency budget.
     static let startupVoiceLimit = 80_000

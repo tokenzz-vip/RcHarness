@@ -121,6 +121,14 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
                 self?.voice.cancelActiveStream()
             }
         }
+        if RemoteMicrophoneOutput.installed,
+           dashboardModel.microphoneGranted,
+           dashboardModel.outputDevices.contains(where: { $0.id == dashboardModel.outputUID }) {
+            // Build the Core Audio graph before the first voice press. The
+            // loopback driver adds no intentional device latency, so this work
+            // belongs in idle time rather than on the first audio packet.
+            microphone.warmUp()
+        }
         gestures.onOutput = { [weak self] mapping, pressed, input in
             self?.sendAction(mapping, pressed: pressed, input: input)
         }
@@ -177,7 +185,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate {
         if !dashboardModel.inputGranted || !dashboardModel.accessibilityGranted {
             dashboardModel.showVoicePermissionNotice()
         } else if dashboardModel.microphoneUpdateAvailable {
-            dashboardModel.postNotice("麦克风组件有新版本，请在「连接与语音」中更新。", level: .warning,
+            dashboardModel.postNotice(RemoteMicrophoneInstallation.updateNotice, level: .warning,
                                       recoveryAction: .connection, source: .microphoneUpdate)
         }
         updateStatusItem()

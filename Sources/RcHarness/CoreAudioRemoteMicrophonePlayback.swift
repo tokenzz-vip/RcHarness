@@ -71,13 +71,12 @@ final class CoreAudioRemoteMicrophonePlayback: RemoteMicrophonePlayback {
                 try selectOutputDevice()
                 engine.attach(player)
                 engine.connect(player, to: engine.mainMixerNode, format: format)
-                // AUHAL dispatches format changes after selecting a device.
-                // Yield this queue so they can settle before starting the graph.
-                engineQueue.asyncAfter(deadline: .now() + 0.1) { [self] in
-                    guard !isStopRequested else { return }
-                    let result = Result { try start() }
-                    DispatchQueue.main.async { completion(result) }
-                }
+                // Start as soon as the graph is connected. The loopback
+                // driver reports zero device and stream latency, so a fixed
+                // settling delay only adds to the first-sample response time.
+                guard !isStopRequested else { return }
+                let result = Result { try start() }
+                DispatchQueue.main.async { completion(result) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }

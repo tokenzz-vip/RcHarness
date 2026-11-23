@@ -32,26 +32,58 @@ final class AudioDeviceCatalog: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cached: [Device]?
+    private var loading = false
     private let listenerQueue = DispatchQueue(label: "vip.tokenzz.rcharness.audio-devices")
 
     private init() {
-        var address = Self.devicesAddress
-        let status = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue) { [weak self] _, _ in
-            self?.invalidate()
-            DispatchQueue.main.async { NotificationCenter.default.post(name: .rcHarnessAudioDevicesChanged, object: nil) }
+        // HAL listener registration can synchronously contact coreaudiod. Do
+        // it off the launch thread so a stalled audio service cannot prevent
+        // the application from opening.
+        listenerQueue.async { [weak self] in
+            guard let self else { return }
+            var address = Self.devicesAddress
+            let status = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, self.listenerQueue) { [weak self] _, _ in
+                self?.invalidate()
+                DispatchQueue.main.async { NotificationCenter.default.post(name: .rcHarnessAudioDevicesChanged, object: nil) }
+            }
+            if status != noErr { Log.audio.error("Audio device listener unavailable: \(status)") }
         }
-        if status != noErr { Log.audio.error("Audio device listener unavailable: \(status)") }
     }
 
     func devices() -> [Device] {
         AudioPerformance.measure("Catalog.devices") {
             lock.lock()
-            defer { lock.unlock() }
-            if let cached { return cached }
+            if let cached {
+                lock.unlock()
+                return cached
+            }
+            let shouldLoadAsync = Thread.isMainThread && !loading
+            if shouldLoadAsync { loading = true }
+            lock.unlock()
+
+            if Thread.isMainThread {
+                if shouldLoadAsync {
+                    listenerQueue.async { [weak self] in self?.loadSnapshot() }
+                }
+                return []
+            }
+
             let devices = AudioPerformance.measure("Catalog.enumerate") { Self.enumerate() }
+            lock.lock()
             cached = devices
+            loading = false
+            lock.unlock()
             return devices
         }
+    }
+
+    private func loadSnapshot() {
+        let devices = AudioPerformance.measure("Catalog.enumerate") { Self.enumerate() }
+        lock.lock()
+        cached = devices
+        loading = false
+        lock.unlock()
+        DispatchQueue.main.async { NotificationCenter.default.post(name: .rcHarnessAudioDevicesChanged, object: nil) }
     }
 
     func device(uid: String) -> Device? { devices().first { $0.uid == uid } }

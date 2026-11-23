@@ -45,7 +45,10 @@ final class RemoteMicrophoneOutput {
     nonisolated static let deviceName = "RcHarness 遥控器麦克风"
     nonisolated static let deviceUID = "vip.tokenzz.rcharness.microphone.device"
     private static let maximumQueuedSamples = PCMBacklog.voiceLimit
-    private static let maximumScheduledBuffers = 4
+    // Keep two packets in the normal engine queue. A short burst can expand
+    // this to four packets while the output catches up.
+    private static let maximumScheduledBuffers = 2
+    private static let catchUpScheduledBuffers = 4
     private static let maximumRecoveryAttempts = 2
     private let makePlayback: () throws -> RemoteMicrophonePlayback
     private let schedule: Scheduler
@@ -55,7 +58,8 @@ final class RemoteMicrophoneOutput {
     private var buttonPressed = false
     private var buttonGeneration: Int?
     private var bufferedPCM = PCMBacklog()
-    private var scheduledPCM: [(id: UUID, pcm: [Int16])] = []
+    private var scheduledPCM: [(id: UInt64, pcm: [Int16])] = []
+    private var nextScheduledID: UInt64 = 0
     private var playbackGeneration = 0
     private var recoveryAttempts = 0
     private var recoveryWork: DispatchWorkItem?
@@ -190,13 +194,18 @@ final class RemoteMicrophoneOutput {
         // Keep a cold graph's first sentence until it catches up. Applying the
         // live half-second limit here used to discard almost all initial speech.
         let scheduledSamples = queuedSamples - bufferedPCM.count
-        let startupBacklog = preparing || startupWork != nil || recoveryWork != nil
+        let preparingBacklog = preparing || startupWork != nil || recoveryWork != nil
             || queuedSamples > Self.maximumQueuedSamples
-        if startupBacklog, queuedSamples + pcm.count > PCMBacklog.startupVoiceLimit {
+        let smallPacket = pcm.count <= PCMBacklog.catchUpThreshold
+        let catchUpBacklog = smallPacket && (bufferedPCM.count >= PCMBacklog.catchUpThreshold
+            || queuedSamples >= Self.maximumQueuedSamples)
+        let limit = preparingBacklog
+            ? PCMBacklog.startupVoiceLimit
+            : catchUpBacklog ? PCMBacklog.catchUpVoiceLimit : Self.maximumQueuedSamples
+        if preparingBacklog, queuedSamples + pcm.count > PCMBacklog.startupVoiceLimit {
             fail("遥控器音频设备准备过慢，请松开语音键后重试。")
             return
         }
-        let limit = startupBacklog ? PCMBacklog.startupVoiceLimit : Self.maximumQueuedSamples
         let wasTrimming = droppedSamples > 0
         droppedSamples += bufferedPCM.append(pcm, limit: limit - scheduledSamples)
         queuedSamples = scheduledSamples + bufferedPCM.count
@@ -213,10 +222,14 @@ final class RemoteMicrophoneOutput {
             recoverPlayback()
             return
         }
-        while scheduledPCM.count < Self.maximumScheduledBuffers, let pcm = bufferedPCM.popFirst() {
+        let capacity = bufferedPCM.count >= PCMBacklog.catchUpThreshold
+            && bufferedPCM.packets.allSatisfy { $0.count <= PCMBacklog.catchUpThreshold }
+            ? Self.catchUpScheduledBuffers : Self.maximumScheduledBuffers
+        while scheduledPCM.count < capacity, let pcm = bufferedPCM.popFirst() {
             let current = generation
             let currentPlayback = playbackGeneration
-            let id = UUID()
+            nextScheduledID &+= 1
+            let id = nextScheduledID
             scheduledPCM.append((id, pcm))
             let completion = { [weak self] in
                 DispatchQueue.main.async {
