@@ -227,6 +227,53 @@ class DMGPackagingTests(unittest.TestCase):
             ], check=True)
             self.assertEqual(read_dmg_info(dmg)["CFBundleIdentifier"], "vip.tokenzz.rcharness")
 
+    def test_package_script_retries_only_temporary_verification_failures(self):
+        for scenario, expected_attempts, succeeds in (
+            ("temporary", 2, True),
+            ("unavailable", 3, False),
+            ("invalid", 1, False),
+        ):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as scratch:
+                root = Path(scratch)
+                info = root / "RcHarness.app/Contents/Info.plist"
+                info.parent.mkdir(parents=True)
+                info.write_bytes(plistlib.dumps({"CFBundleIdentifier": "vip.tokenzz.rcharness"}))
+                hdiutil = root / "hdiutil"
+                hdiutil.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+                    import sys
+                    from pathlib import Path
+
+                    command, *args = sys.argv[1:]
+                    image = Path(args[-1])
+                    if command == "create":
+                        image.touch(exist_ok=False)
+                    else:
+                        assert command == "verify" and image.is_file()
+                        with image.with_suffix(".attempts").open("a+") as attempts:
+                            attempts.seek(0)
+                            previous_attempts = attempts.read().count("\\n")
+                            attempts.write("verify\\n")
+                        scenario = image.stem
+                        if scenario == "invalid":
+                            sys.exit("hdiutil: verify failed - image data corrupted")
+                        if scenario == "unavailable" or previous_attempts == 0:
+                            sys.exit("hdiutil: verify failed - Resource temporarily unavailable")
+                    '''))
+                hdiutil.chmod(0o755)
+                sleep = root / "sleep"
+                sleep.write_text("#!/bin/sh\nexit 0\n")
+                sleep.chmod(0o755)
+
+                dmg = root / f"{scenario}.dmg"
+                packaged = subprocess.run([
+                    str(Path(__file__).resolve().parents[1] / "package_dmg.sh"),
+                    str(info.parent.parent), str(dmg),
+                ], env={**os.environ, "PATH": str(root) + os.pathsep + os.environ["PATH"]},
+                    capture_output=True, text=True)
+                self.assertEqual(packaged.returncode == 0, succeeds, packaged.stderr)
+                self.assertEqual(dmg.with_suffix(".attempts").read_text().splitlines(),
+                                 ["verify"] * expected_attempts)
+
 
 class ReleasePublicationTests(unittest.TestCase):
     def test_publication_assets_and_failure_gates(self):

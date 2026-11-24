@@ -44,5 +44,20 @@ hdiutil create \
   -format UDZO \
   -imagekey zlib-level=9 \
   -ov "$OUTPUT"
-hdiutil verify "$OUTPUT" >/dev/null
+# The disk image service can briefly be unavailable just after creation.
+for attempt in 1 2 3; do
+  verify_status=0
+  verify_log=$(LC_ALL=C hdiutil verify "$OUTPUT" 2>&1 >/dev/null) || verify_status=$?
+  if [[ -n "$verify_log" ]]; then
+    printf '%s\n' "$verify_log" >&2
+  fi
+  if [[ "$verify_status" -eq 0 ]]; then
+    break
+  fi
+  if [[ "$attempt" -eq 3 || "$verify_log" != *'hdiutil: verify failed - Resource temporarily unavailable' ]]; then
+    exit "$verify_status"
+  fi
+  echo 'Retrying DMG verification in 2 seconds.' >&2
+  sleep 2
+done
 echo "Packaged $OUTPUT"
