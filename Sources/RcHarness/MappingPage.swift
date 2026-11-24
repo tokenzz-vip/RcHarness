@@ -14,6 +14,7 @@ struct MappingLayout {
     static let profileBindingStatusWidth: CGFloat = 245
     let size: CGSize
     let profile: RemoteProfile
+    var compactText = false
 
     var leftInputs: [ControllerInput] {
         if profile.adapter == .chromecast {
@@ -36,7 +37,7 @@ struct MappingLayout {
     var remoteWidth: CGFloat { remoteHeight * RemoteArtworkView.artworkAspectRatio(for: profile.artwork) }
     var remoteTop: CGFloat { (size.height - remoteHeight - 28) / 2 }
     // Grow the controls and text together, while keeping large windows readable.
-    var contentScale: CGFloat { min(1.25, max(1, size.height / 468)) * (profile.adapter == .xiaomi ? 1 : 0.88) }
+    var contentScale: CGFloat { min(compactText ? 1 : 1.25, max(1, size.height / 468)) * (profile.adapter == .xiaomi ? 1 : 0.88) }
 }
 
 @MainActor
@@ -68,10 +69,9 @@ struct MappingPage: View {
     }
 }
 
-/// Keep live input observation within the mapping canvas, away from the
-/// profile controls and the rest of the dashboard.
+/// Share the remote diagram and mapping labels with the read-only shortcuts panel.
 @MainActor
-private struct MappingCanvas: View {
+struct MappingCanvas: View {
     private struct TriggerFocus: Hashable {
         let input: ControllerInput
         let trigger: ButtonTrigger
@@ -79,6 +79,7 @@ private struct MappingCanvas: View {
 
     @ObservedObject var model: RemoteDashboardModel
     @ObservedObject var live: RemoteLiveStatus
+    var readOnly = false
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTrigger: TriggerFocus?
     @FocusState private var focusedArtworkInput: ControllerInput?
@@ -86,7 +87,7 @@ private struct MappingCanvas: View {
     @State private var hoveredArtworkInput: ControllerInput?
 
     private var previewInput: ControllerInput? {
-        if model.editorVisible { return model.selectedInput }
+        if !readOnly, model.editorVisible { return model.selectedInput }
         return hoveredArtworkInput ?? hoveredCardInput ?? focusedArtworkInput ?? focusedTrigger?.input
     }
 
@@ -99,7 +100,8 @@ private struct MappingCanvas: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = MappingLayout(size: proxy.size, profile: model.remoteProfile)
+            let layout = MappingLayout(size: proxy.size, profile: model.remoteProfile,
+                                       compactText: readOnly && proxy.size.width < 820)
             let columnWidth = (proxy.size.width - layout.centerColumnWidth) / 2
             ZStack {
                 HStack(alignment: .top, spacing: 0) {
@@ -114,7 +116,7 @@ private struct MappingCanvas: View {
                                 guard !model.editorVisible else { return }
                                 hoveredArtworkInput = input
                             },
-                            onSelectInput: { input in
+                            onSelectInput: readOnly ? nil : { input in
                                 clearHover()
                                 model.openButtonEditor(input)
                             },
@@ -183,23 +185,30 @@ private struct MappingCanvas: View {
 
     private func voiceCard(_ input: ControllerInput, layout: MappingLayout) -> some View {
         let shortcut = model.mappingTitle(model.effectiveMapping[.options])
-        return Button {
-            model.openButtonEditor(input)
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Label(input.label, systemImage: "mic").font(.system(size: max(11, 12 * layout.contentScale), weight: .semibold))
-                    Spacer()
-                    globalButtonScopeLabel
-                }
-                Text(shortcut).font(.system(size: max(11, 11 * layout.contentScale))).foregroundStyle(.secondary).lineLimit(1)
-            }.padding(8 * layout.contentScale).frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: layout.cardHeight)
-                .contentShape(Rectangle())
+        let label = VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(input.label, systemImage: "mic").font(.system(size: max(11, 12 * layout.contentScale), weight: .semibold))
+                Spacer()
+                globalButtonScopeLabel
+            }
+            Text(shortcut).font(.system(size: max(11, 11 * layout.contentScale))).foregroundStyle(.secondary)
+                .lineLimit(readOnly ? 2 : 1)
         }
-        .buttonStyle(.plain)
-        .focused($focusedTrigger, equals: TriggerFocus(input: input, trigger: .single))
-        .accessibilityLabel(input.label)
+        .padding(8 * layout.contentScale)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: layout.cardHeight)
+        .contentShape(Rectangle())
+        return Group {
+            if readOnly {
+                label.accessibilityElement(children: .ignore)
+            } else {
+                Button { model.openButtonEditor(input) } label: { label }
+                    .buttonStyle(.plain)
+                    .focused($focusedTrigger, equals: TriggerFocus(input: input, trigger: .single))
+            }
+        }
+        .help(shortcut)
+        .accessibilityLabel("\(input.label) · 全局")
         .accessibilityValue(shortcut)
     }
 
@@ -218,34 +227,43 @@ private struct MappingCanvas: View {
                 ForEach(input.supportedTriggers) { trigger in
                     let mapping = model.effectiveMapping[input, trigger]
                     let configured = mapping.action != .disabled
-                    Button {
-                        model.openButtonEditor(input, trigger: trigger)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(trigger.title)
-                                .font(.system(size: max(10, 9 * layout.contentScale)))
+                    let label = VStack(alignment: .leading, spacing: 0) {
+                        Text(trigger.title)
+                            .font(.system(size: max(10, 9 * layout.contentScale)))
+                            .foregroundStyle(SettingsStyle.mappingTriggerLabel(in: colorScheme))
+                            .lineLimit(1)
+                        Text(configured ? cardTitle(mapping) : "– 未设置")
+                            .font(.system(size: max(11, 11 * layout.contentScale),
+                                          weight: configured ? .semibold : .regular))
+                            .foregroundStyle(configured ? .primary : SettingsStyle.mappingTriggerLabel(in: colorScheme))
+                            .minimumScaleFactor(0.92)
+                            .lineLimit(readOnly ? 2 : 1)
+                        if let detail = cardDetail(mapping.action) {
+                            Text(detail)
+                                .font(.system(size: max(10, 9 * layout.contentScale),
+                                              design: mapping.action == .rapidDelete ? .default : .monospaced))
                                 .foregroundStyle(SettingsStyle.mappingTriggerLabel(in: colorScheme))
-                            Text(configured ? cardTitle(mapping) : "– 未设置")
-                                .font(.system(size: max(11, 11 * layout.contentScale),
-                                              weight: configured ? .semibold : .regular))
-                                .foregroundStyle(configured ? .primary : SettingsStyle.mappingTriggerLabel(in: colorScheme))
-                                .minimumScaleFactor(0.92)
-                            if let detail = cardDetail(mapping.action) {
-                                Text(detail)
-                                    .font(.system(size: max(10, 9 * layout.contentScale),
-                                                  design: mapping.action == .rapidDelete ? .default : .monospaced))
-                                    .foregroundStyle(SettingsStyle.mappingTriggerLabel(in: colorScheme))
-                            }
+                                .lineLimit(1)
                         }
-                        .lineLimit(1)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, 8)
-                        .padding(.trailing, 4)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(MappingTriggerButtonStyle(isConfigured: configured))
-                    .focused($focusedTrigger, equals: TriggerFocus(input: input, trigger: trigger))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 8)
+                    .padding(.trailing, 4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .contentShape(Rectangle())
+                    Group {
+                        if readOnly {
+                            label
+                                .background {
+                                    MappingTriggerBackground(isConfigured: configured)
+                                }
+                                .accessibilityElement(children: .ignore)
+                        } else {
+                            Button { model.openButtonEditor(input, trigger: trigger) } label: { label }
+                                .buttonStyle(MappingTriggerButtonStyle(isConfigured: configured))
+                                .focused($focusedTrigger, equals: TriggerFocus(input: input, trigger: trigger))
+                        }
+                    }
                     .overlay(alignment: .leading) {
                         if trigger != .single {
                             Rectangle()
@@ -296,6 +314,20 @@ private struct MappingCanvas: View {
     }
 }
 
+private struct MappingTriggerBackground: View {
+    let isConfigured: Bool
+    var interactionOpacity: Double = 0
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let baseOpacity = isConfigured ? (colorScheme == .dark ? 0.10 : 0.08) : 0
+        RoundedRectangle(cornerRadius: 4)
+            .fill(Color.primary.opacity(baseOpacity + interactionOpacity))
+            .padding(.horizontal, 2)
+            .allowsHitTesting(false)
+    }
+}
+
 private struct MappingTriggerButtonStyle: ButtonStyle {
     let isConfigured: Bool
 
@@ -306,24 +338,15 @@ private struct MappingTriggerButtonStyle: ButtonStyle {
     private struct TriggerButton: View {
         let configuration: ButtonStyleConfiguration
         let isConfigured: Bool
-        @Environment(\.colorScheme) private var colorScheme
         @State private var isHovered = false
 
         var body: some View {
             configuration.label
                 .background {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.primary.opacity(backgroundOpacity))
-                        .padding(.horizontal, 2)
-                        .allowsHitTesting(false)
+                    MappingTriggerBackground(isConfigured: isConfigured,
+                        interactionOpacity: configuration.isPressed ? 0.06 : isHovered ? 0.03 : 0)
                 }
                 .onHover { isHovered = $0 }
-        }
-
-        private var backgroundOpacity: Double {
-            let base = isConfigured ? (colorScheme == .dark ? 0.10 : 0.08) : 0
-            let interaction = configuration.isPressed ? 0.06 : isHovered ? 0.03 : 0
-            return base + interaction
         }
     }
 }
@@ -767,6 +790,10 @@ struct ActionMappingEditor: View {
             }
             if value.action == .openPhrases {
                 Text("唤出独立常用语浮层。上下左右和确认键各对应一条常用语，单击输入内容1，双击输入内容2；返回或主页关闭。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if value.action == .showShortcuts {
+                Text("浮层显示当前生效方案的按键配置。再次触发同一手势即可关闭。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if value.action == .recordedShortcut {

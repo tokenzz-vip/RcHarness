@@ -245,11 +245,11 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
     case mouseLeft, mouseRight, pointerUp, pointerDown, pointerLeft, pointerRight
     case scrollUp, scrollDown, volumeUp, volumeDown, recordedShortcut, openApplication, disabled
     case leftCommand, fn, leftOption, rightOption, playPause, mute, phrase, macro
-    case openHarnessSwitcher, openPhrases, showAllWindows, switchApplications, showDesktop, focusChatGPT
+    case openHarnessSwitcher, openPhrases, showShortcuts, showAllWindows, switchApplications, showDesktop, focusChatGPT
     case focusClaude, focusCursor, focusDeepSeek, focusWorkBuddy, focusOpenCode
 
     static let harnessFocusActions: [Self] = [.focusChatGPT, .focusClaude, .focusCursor, .focusDeepSeek, .focusWorkBuddy, .focusOpenCode]
-    static let interactiveActions: [Self] = [.switchToNativeMode, .toggleMouseMode, .switchApplications, .openHarnessSwitcher, .openPhrases]
+    static let interactiveActions: [Self] = [.switchToNativeMode, .toggleMouseMode, .switchApplications, .openHarnessSwitcher, .openPhrases, .showShortcuts]
 
     var harnessFocusTarget: HarnessFocusTarget? {
         switch self {
@@ -322,6 +322,7 @@ enum RemoteAction: String, CaseIterable, Codable, Identifiable, Hashable {
         case .macro: "执行组合动作"
         case .openHarnessSwitcher: "打开运行 Harness 列表"
         case .openPhrases: "唤出常用语"
+        case .showShortcuts: "查看快捷键"
         case .focusChatGPT: "打开聚焦ChatGPT"
         case .focusClaude: "打开聚焦Claude"
         case .focusCursor: "打开聚焦Cursor"

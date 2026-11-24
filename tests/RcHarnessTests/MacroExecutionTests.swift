@@ -13,8 +13,8 @@ final class MacroExecutionTests: XCTestCase {
         }
     }
 
-    func testModeSwitchInImportedMacroFailsBeforeAnyStepsRun() {
-        for action in [RemoteAction.switchToNativeMode, .toggleMouseMode] {
+    func testInteractiveActionInImportedMacroFailsBeforeAnyStepsRun() {
+        for action in [RemoteAction.switchToNativeMode, .toggleMouseMode, .showShortcuts] {
             let macro = SavedMacro(name: "旧组合动作", steps: [step(.copy), step(action)])
             XCTAssertThrowsError(try MacroExecutionPlan(macro, macros: [macro])) { error in
                 XCTAssertEqual(error as? MacroExecutionError, .unsupportedAction)

@@ -44,6 +44,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
     private lazy var phrasePicker = PhrasePickerController { [weak self] text in
         self?.sender.typeText(text)
     }
+    private let shortcutOverview = ShortcutOverviewController()
     private var macroWork: [DispatchWorkItem] = []
     private lazy var voiceSession = RemoteVoiceSessionController(output: microphone,
         shouldRouteRemoteAudio: { [weak self] in self?.dashboardModel?.useRemoteMicrophone == true }) { [weak self] mapping, pressed in
@@ -157,6 +158,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             self.applicationSwitcher.reset()
             self.harnessSwitcher.model.reset(reason: "setup-navigation")
             self.phrasePicker.model.reset()
+            self.shortcutOverview.dismiss()
             self.gestures.cancel()
             self.cancelMacros()
             self.heldVoiceInput = nil
@@ -217,6 +219,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
 
     private func switchRemote(to profile: RemoteProfile) {
         setMouseMode(false)
+        shortcutOverview.dismiss()
         applicationSwitcher.reset()
         remoteSelectionRevision += 1
         let revision = remoteSelectionRevision
@@ -323,6 +326,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         applicationSwitcher.reset()
         harnessSwitcher.model.reset(reason: "sleep")
         phrasePicker.model.reset()
+        shortcutOverview.dismiss()
         dashboardModel?.flushPendingWrites()
         gestures.cancel()
         cancelMacros()
@@ -377,6 +381,9 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         mouseItem.target = self
         mouseItem.tag = 102
         statusMenu.addItem(mouseItem)
+        let shortcutsItem = NSMenuItem(title: RemoteAction.showShortcuts.label, action: #selector(toggleShortcutOverview), keyEquivalent: "")
+        shortcutsItem.target = self
+        statusMenu.addItem(shortcutsItem)
         let resetItem = NSMenuItem(title: "恢复当前方案的默认映射…", action: #selector(resetMapping), keyEquivalent: "")
         resetItem.target = self
         statusMenu.addItem(resetItem)
@@ -622,6 +629,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             if pressed { setOperationMode(.native) }
         } else if button.action == .toggleMouseMode {
             if pressed { toggleMouseMode() }
+        } else if button.action == .showShortcuts {
+            if pressed { toggleShortcutOverview() }
         } else if button.action == .phrase {
             if pressed, let phrase = dashboardModel?.phrases.first(where: { $0.id.uuidString == button.referenceID }) {
                 sender.typeText(phrase.text)
@@ -716,10 +725,16 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         setMouseMode(!dashboardModel.mouseModeEnabled)
     }
 
+    @objc private func toggleShortcutOverview() {
+        guard mode == .mapping, let dashboardModel, !dashboardModel.setup.isPresented else { return }
+        shortcutOverview.toggle(model: dashboardModel)
+    }
+
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(toggleMode): return dashboardModel?.setup.isPresented == false
-        case #selector(toggleMouseMode): return mode == .mapping && dashboardModel?.setup.isPresented == false
+        case #selector(toggleMouseMode), #selector(toggleShortcutOverview):
+            return mode == .mapping && dashboardModel?.setup.isPresented == false
         default: return true
         }
     }
@@ -743,6 +758,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
         harnessFocusRequest = UUID()
         harnessSwitcher.model.reset(reason: "mode-changed")
         phrasePicker.model.reset()
+        shortcutOverview.dismiss()
         gestures.cancel()
         cancelMacros()
         heldVoiceInput = nil
@@ -910,7 +926,7 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             return CommandLine.arguments[flag + 1]
         }()
         func render(_ index: Int) {
-            guard index <= pages.count + 20 else {
+            guard index <= pages.count + 21 else {
                 renderSetupPreviews(in: directory)
                 let shortcut = RecordedShortcut(keyCode: 12, flags: [.maskControl, .maskCommand], keyLabel: "Q")
                 let keyboard = NSHostingView(rootView: ShortcutKeyboardPicker(shortcut: shortcut, onCancel: {}, onConfirm: { _ in }))
@@ -949,7 +965,12 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
             let statisticsYearsPreview = index == pages.count + 16
             let statisticsMonthsPreview = index == pages.count + 17
             let macroEditorPreview = index == pages.count + 18
-            if macroEditorPreview {
+            let shortcutsPreview = index == pages.count + 21
+            if shortcutsPreview {
+                dashboardModel.activateHarness(previewHarnessID)
+                dashboardModel.update(ButtonMapping(action: .showShortcuts), for: .buttonB, trigger: .double)
+                shortcutOverview.toggle(model: dashboardModel, narrow: CommandLine.arguments.contains("--narrow"))
+            } else if macroEditorPreview {
                 for notice in dashboardModel.actionNotices { dashboardModel.dismissNotice(notice.id) }
                 dashboardModel.page = .mapping
                 dashboardModel.selectedInput = .buttonY
@@ -1048,7 +1069,8 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
                 windowController.window?.makeKeyAndOrderFront(nil)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [self] in
-                let filename = systemActionPreview == .toggleMouseMode ? "mouse-mode-editor"
+                let filename = shortcutsPreview ? "shortcut-overview"
+                    : systemActionPreview == .toggleMouseMode ? "mouse-mode-editor"
                     : systemActionPreview == .switchApplications ? "application-switcher-editor"
                     : macroEditorPreview ? "macro-editor" : statisticsMonthsPreview ? "statistics-all-months" : statisticsYearsPreview ? "statistics-all-years" : audioFailurePreview ? "audio-failure-notice" : importFailureDetailsPreview ? "import-failure-details" : importFailurePreview ? "import-failure-notice" : permissionsDestinationPreview ? "permissions-destination" : permissionNoticePreview ? "permission-notice" : deletionUndoPreview ? "deletion-undo" : deletionPreview ? "deletion-confirmation" : configurationImportPreview ? "configuration-import" : rapidDeletePreview ? "rapid-delete-editor" : phrasePreview ? "phrase-picker" : phraseEmptyPreview ? "phrases-empty" : profileNamePreview ? (index == pages.count + 3 ? "profile-create" : "profile-rename") : voiceEditorPreview ? "voice-editor" : switcherPreview ? "harness-switcher" : chatgptPreview ? "mapping-" + previewHarnessID : pages[index].rawValue
                 let voiceEditor = voiceEditorPreview || rapidDeletePreview || macroEditorPreview || systemActionPreview != nil
@@ -1101,7 +1123,11 @@ final class RcHarnessApp: NSObject, NSApplicationDelegate, NSMenuItemValidation 
                         configurationEditor = content
                     }
                 }
-                if let view: NSView = configurationEditor ?? nameEditor ?? voiceEditor ?? (phrasePreview ? phrasePicker.renderView : switcherPreview ? harnessSwitcher.renderView : windowController.window?.contentView) {
+                let pageView = shortcutsPreview ? shortcutOverview.renderView
+                    : phrasePreview ? phrasePicker.renderView
+                    : switcherPreview ? harnessSwitcher.renderView
+                    : windowController.window?.contentView
+                if let view: NSView = configurationEditor ?? nameEditor ?? voiceEditor ?? pageView {
                     view.layoutSubtreeIfNeeded()
                     if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                         view.cacheDisplay(in: view.bounds, to: bitmap)
